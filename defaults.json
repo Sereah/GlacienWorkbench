@@ -1,0 +1,139 @@
+{
+  "port": 8910,
+  "sdk_root": "",
+  "scrcpy_path": "",
+  "ffmpeg_path": "",
+  "audio_sample_format": "s16le",
+  "audio_sample_rate": 48000,
+  "audio_channels": 2,
+  "process_package_keywords": [],
+  "log_filters": {},
+  "apk_sources": {},
+  "app_launches": {},
+  "signing": {
+    "keystores": {}
+  },
+  "apk_push_device_paths": {},
+  "resource_device_paths": {},
+  "broadcasts": {},
+  "offline_filter_presets": {},
+  "adb_commands": {
+    "过滤app安装的地方": {
+      "category": "package相关",
+      "description": "",
+      "command": "pm list packages -a -f |grep {{package}}",
+      "timeout_seconds": 30
+    },
+    "通过action查找app中对应的activity": {
+      "category": "package相关",
+      "description": "比如查找启动页的action：android.intent.action.MAIN",
+      "command": "dumpsys package {{package}} | grep -A 10 {{action}}",
+      "timeout_seconds": 30
+    },
+    "通过包名查询apk安装目录": {
+      "category": "package相关",
+      "description": "",
+      "command": "pm path {{package}}",
+      "timeout_seconds": 30
+    },
+    "通过关键字查询apk安装目录": {
+      "category": "package相关",
+      "description": "",
+      "command": "pm list packages -a -f |grep {{keyword}}",
+      "timeout_seconds": 30
+    },
+    "查看权限赋予情况": {
+      "category": "package相关",
+      "description": "例如：adb dumpsys package com.bytedance.vehicle.control | grep INTERNET",
+      "command": "dumpsys package {{package}} | grep {{permission}}",
+      "timeout_seconds": 30
+    },
+    "查看用户列表": {
+      "category": "package相关",
+      "description": "",
+      "command": "pm list users",
+      "timeout_seconds": 30
+    },
+    "查看指定app是否安装在指定用户下": {
+      "category": "package相关",
+      "description": "",
+      "command": "pm list packages --user {{userid}} | grep {{package}}",
+      "timeout_seconds": 30
+    },
+    "将主用户下app安装到指定用户": {
+      "category": "package相关",
+      "description": "",
+      "command": "pm install-existing --user {{userId}} {{package}}",
+      "timeout_seconds": 30
+    },
+    "查看当前焦点所在的窗口": {
+      "description": "",
+      "command": "dumpsys window | grep mCurrentFocus",
+      "timeout_seconds": 30,
+      "category": "window相关"
+    },
+    "查看displayID": {
+      "description": "",
+      "command": "dumpsys display | grep displayId",
+      "timeout_seconds": 30,
+      "category": "window相关"
+    },
+    "黑白夜切换": {
+      "description": "输入yes或者no",
+      "command": "cmd uimode night {{yes-no}}",
+      "timeout_seconds": 30,
+      "category": "配置相关"
+    },
+    "dump指定包名overlay": {
+      "description": "",
+      "command": "cmd overlay dump {{package}}",
+      "timeout_seconds": 30,
+      "category": "配置相关"
+    },
+    "列出所有overlay": {
+      "description": "",
+      "command": "cmd overlay list",
+      "timeout_seconds": 30,
+      "category": "配置相关"
+    },
+    "查看安卓版本": {
+      "description": "",
+      "command": "getprop ro.build.version.release",
+      "timeout_seconds": 30,
+      "category": "System Property命令"
+    },
+    "查看蓝牙开关保存状态": {
+      "description": "",
+      "command": "settings get global bluetooth_on",
+      "timeout_seconds": 30,
+      "category": "Settings数据库命令"
+    },
+    "获取打开的无障碍服务": {
+      "description": "",
+      "command": "settings get secure enabled_accessibility_services",
+      "timeout_seconds": 30,
+      "category": "Settings数据库命令"
+    },
+    "给指定服务授权打开无障碍服务": {
+      "description": "填入无障碍服务名字，例如：com.lunacattus.app.media/com.lunacattus.app.media.service.MyAccessibilityService",
+      "command": "settings put secure enabled_accessibility_services {{servierName}}",
+      "timeout_seconds": 30,
+      "category": "Settings数据库命令"
+    },
+    "设置日志打印等级": {
+      "description": "",
+      "command": "setprop persist.log.tag {{level}}",
+      "timeout_seconds": 30,
+      "category": "System Property命令"
+    }
+  },
+  "offline_log_sources": {},
+  "device_log_sources": {},
+  "adb_command_categories": [
+    "package相关",
+    "window相关",
+    "配置相关",
+    "System Property命令",
+    "Settings数据库命令"
+  ]
+}

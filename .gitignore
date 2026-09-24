@@ -1,0 +1,73 @@
+# OS and editor metadata
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python caches, environments and test artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+.desktop-build-venv/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+
+# Desktop build and distribution output
+/build/
+/dist/
+/release-output/
+/target/
+*.spec
+
+# Generated packages, logs and Android artifacts
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.log
+*.apk
+*.apks
+*.aab
+*.idsig
+
+# Runtime user data must stay outside source control
+/app.json
+/apk-center/
+/resource-deployment/
+/signing/
+/processes/
+/broadcasts/
+/live-logs/
+/offline-logs/
+/device-logs/
+/commands/
+/captures/
+/device-files/
+/runtime/
+/local-tools/
+/adb-tools/
+/.glacien/
+
+# Legacy local configuration
+/active_settings.json
+/settings.json
+/settings.*.json

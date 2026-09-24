@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Glacien 的 ADB 调试工具
+Comment=Glacien ADB debug tool
+Exec=sh -c 'cd "$(dirname "%k")" && python3 codes/launcher.py'
+Terminal=true
+Categories=Development;

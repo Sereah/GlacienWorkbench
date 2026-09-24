@@ -1,0 +1,24 @@
+# 设备、进程与广播
+
+- `app/android.py` 定位 Android SDK 工具、列出 `adb devices -l`，并执行 ADB。
+- ADB 首页通过设备实时状态展示 ADB Root 与 Remount：Root 以 shell id 是否包含 uid=0(root) 为准；Remount 检查 /system、/vendor、/product、/system_ext 中实际出现的关键挂载点是否都有可写挂载或 overlay。状态不写入 settings 或浏览器缓存。
+- Root/Remount 操作必须先验证当前选择的 serial，再分别执行 adb -s <serial> root 和 adb -s <serial> remount。Root 会重启 adbd，后端应等待设备重新上线；已经完成的操作在页面中禁用，Remount 在未 Root 时也禁用。
+- ADB 首页“无线 ADB”打开时会自动发现设备：合并当前在线无线 transport、`adb mdns services` 中可直接连接的 `_adb._tcp` / `_adb-tls-connect._tcp` 服务、设备热点默认网关和当前活动 IPv4 `/24` 网段的指定 TCP 端口。网段扫描使用受限并发和短超时，只把端口开放项标为候选；完成 `adb connect` 握手后才视为设备。第三方 Wi-Fi 开启客户端隔离时无法跨终端发现，页面必须明确提示。
+- 无线扫描前只对 `adb devices -l` 中状态为 `offline` 且 serial 符合 IPv4:port 的 transport 执行精确 `adb disconnect`；不得影响 USB 或在线无线设备。结果列表支持断开指定无线设备，并清除前端对应选择和最近连接记录。
+- 地址建议仍优先使用已连接无线 serial，其次从已选/唯一 USB 设备的 `wlan0` 读取 IPv4，再使用当前活动网络的默认网关，最后降级到 ADB 历史无线地址。用户可修改 IPv4 和端口，默认端口 5555。选择“先让 USB 设备监听”时执行 `adb -s <USB serial> tcpip <port>`，随后以参数数组执行 `adb connect <IPv4>:<port>`。
+- macOS 在 VPN 或 Wi-Fi 切换后可能出现新 socket 可访问、旧 ADB server 却返回 `No route to host` 的情况。连接失败且目标端口实际可达时，允许重启默认 ADB server 并重试一次。
+- 无线连接前用短超时检查默认 ADB server。若 5037 上的 server 卡死，只允许终止该端口监听者且进程名明确为 `adb` / `adb.exe` 的 PID；不得按名称批量杀进程。恢复后启动 ADB server，并只重试一次无线连接。
+- ADB 首页另提供用户明确要求的“强杀 ADB”入口，固定执行 `pkill -9 -x adb`，不接受前端命令参数。该操作会中断全部本机 ADB 会话，必须二次确认并先关闭当前 Logcat；Windows 明确返回不支持。
+- ADB 首页的 Root/Remount 状态只通过对应操作按钮展示，不在下方设备信息卡重复显示。设备重启使用经过 serial 校验的 adb -s <serial> reboot，前端必须二次确认、停止当前 Logcat，并由现有状态轮询跟踪设备离线和恢复。
+- 多设备时，ADB 首页选择的序列号只保存在浏览器本地；`android.selected_device_settings()` 必须先在当前 `adb devices` 结果中验证它是 `device` 状态，随后 `android.device_adb()` 强制添加 `-s <serial>`。没有选择时只有恰好一台已授权设备可自动采用；两台及以上必须拒绝设备操作，不能退回第一台。
+- `app/device.py` 负责进程、平台签名比较、拉起/停止和广播。
+- 平台签名通过 `dumpsys package android` 与应用 `dumpsys package <package>` 比较。
+- 已安装包的签名证书 SHA-256 使用 `pm path` 选择 `base.apk`，Pull 到 `TemporaryDirectory` 后复用本机 `apksigner` 验签；成功或失败都必须清理临时 APK。严格验签失败时继续兼容仅 v2/v3/v3.1 签名的 APK，但必须返回旧系统兼容性警告。`dumpsys package` 的 `signatures:[xxxxxxxx]` 是短摘要，不是完整证书 SHA-256。
+- 应用拉起命令必须按包单独配置在 `app_launches.<package>.command`，用户只填写 `adb shell` 后的设备端命令。后端用 `shlex.split()` 解析并通过 ADB 参数数组执行，只允许 `am start` 或 `am start-activity`，不猜测 Activity，也不接受 Shell 管道、重定向或命令替换。processes schema v2 会把旧版 action/component/activity/extras 自动迁移为等价命令。
+- Component 必须是 `包名/Activity` 完整形式。
+- 广播使用参数数组构造 `am broadcast`，不要拼接 shell 字符串。
+- 自定义设备端命令由 `device.device_shell_args()` 整体包成 `adb shell sh -c`，绝不使用本机 `shell=True`。用户模板不能写 `adb`；旧方案的 `shell ` 前缀会兼容移除。主机侧 `adb connect/push/pull/install` 不属于此页面范围，仍由专用功能处理。
+- 高风险命令只在用户确认后执行；确认提示必须展示最终 `adb ...` 参数。`logcat` 必须加 `-d`，实时流继续使用日志页。
+- 命令模板变量支持 `{{name}}`（推荐）和 `<name>`。后端在 `shlex` 解析前按本次 `variables` 请求字段替换，变量值必须是受限单参数字符，且绝不写入 settings。`dumpsys`、`pm`、`wm`、`settings` 等常见设备命令可省略 `shell`；带设备端管道时会封装为带整条脚本引用的 `shell sh -c`。纯查询管道不确认，只有脚本包含破坏性操作才纳入风险确认。
+- 命令页有互斥的“临时输入”和“已保存命令”状态：临时输入只接收完整命令文本，不支持变量或超时字段；选择已保存命令后才根据该模板生成变量输入，并使用该命令保存的 `timeout_seconds`。切回临时输入必须清空已选命令和变量 DOM，不能留下上一个命令的参数框。
+- 命令分类存于 `adb_command_categories`，命令自身用可选 `category` 字段归类。已保存命令在弹层选择器内按分类默认折叠展示并支持搜索，避免占满编辑页面；新建命令与分类管理入口必须独立于选择器。分类改名必须同步更新引用该分类的命令，删除仍被引用的分类才禁止保存。
