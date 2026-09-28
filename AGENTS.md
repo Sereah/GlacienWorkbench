@@ -2,7 +2,7 @@
 
 ## Architecture
 
-Glacien is a Python standard-library HTTP backend with a static HTML/CSS/JavaScript UI. `codes/desktop_launcher.py` hosts it in PySide6 Qt WebEngine; `codes/launcher.py` remains the Chrome/Edge `--app` fallback. The service must bind only to `127.0.0.1`.
+Glacien is a Python standard-library HTTP backend with a static HTML/CSS/JavaScript UI. `codes/desktop_launcher.py` hosts it in PySide6 Qt WebEngine. The service must bind only to `127.0.0.1`.
 
 Keep domain boundaries:
 
@@ -74,7 +74,7 @@ Run from repository root:
 
 ```bash
 PYTHONPYCACHEPREFIX=/private/tmp/glacien_pycache \
-  python3 -m py_compile codes/launcher.py codes/desktop_launcher.py \
+  python3 -m py_compile codes/desktop_launcher.py \
   codes/app/*.py codes/build_desktop.py codes/package_launcher.py
 
 node --check codes/web/app.js

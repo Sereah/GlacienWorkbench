@@ -1,14 +1,14 @@
-"""HTTP API、静态页面服务和应用启动。
+"""HTTP API 与静态页面服务。
 
 本模块只负责编解码与路由；业务逻辑必须继续放在 android/artifacts/device/config 中。
 """
-import json,mimetypes,platform,re,threading,time
+import json,mimetypes,platform,re,time
 from urllib.error import URLError
 from urllib.request import urlopen
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs,urlparse
-from . import android,app_window,artifacts,audio,captures,config,device,device_files,device_logs,logs,runtime,themes
+from . import android,artifacts,audio,captures,config,device,device_files,device_logs,logs,runtime,themes
 
 # 前端是只读程序资源；settings、日志和产物由 config.ROOT 指向可写数据目录。
 STATIC=runtime.resource_path("web").resolve()
@@ -222,18 +222,3 @@ class Handler(BaseHTTPRequestHandler):
                 if time.monotonic()-last_ping>15:self.wfile.write(b": keep-alive\n\n");self.wfile.flush();last_ping=time.monotonic()
         except (BrokenPipeError,ConnectionResetError):pass
         finally:process.terminate()
-
-def run():
-    """以前台方式启动；终端窗口关闭时 Python 进程也会退出。"""
-    server,url=bind_server()
-    if server is None:
-        method=app_window.open_app_window(url)
-        print(f"检测到已运行的 Glacien，界面已通过{method}打开：{url}")
-        return
-    print(f"Glacien Workbench：{url}")
-    def open_window():
-        method=app_window.open_app_window(url)
-        print(f"界面已通过{method}打开。")
-    threading.Timer(.4,open_window).start()
-    try:server.serve_forever()
-    except KeyboardInterrupt:print("\nGlacien Workbench 已停止。")

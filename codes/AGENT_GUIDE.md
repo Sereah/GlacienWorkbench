@@ -41,8 +41,6 @@ desktop_launcher.py
   -> PySide6 QWebEngineView
 ```
 
-`launcher.py` 和 `app/app_window.py` 提供 Chrome、Edge 或 Chromium 应用模式的兼容入口；找不到兼容浏览器时使用系统默认浏览器。两种入口访问同一个本地 HTTP 服务。
-
 端口绑定失败时，启动器先请求该端口的 `/api/config`，并校验端口、`_meta.app_config` 和 `_meta.data_root` 等 Glacien 响应特征。只有确认监听者是 Glacien 时才能复用服务；未知进程不得被终止。
 
 程序资源路径统一通过 `runtime.resource_path()` 获取。`server.STATIC` 使用解析后的真实路径，以兼容桌面 Bundle 中的资源链接并保证静态文件 containment 校验正确。
@@ -77,7 +75,6 @@ ADB 工具
 
 | 路径 | 当前职责 |
 | --- | --- |
-| `launcher.py` | 浏览器应用模式兼容入口 |
 | `desktop_launcher.py`、`app/desktop.py` | Qt WebEngine 桌面入口、窗口和下载生命周期 |
 | `app/runtime.py` | 程序资源、版本信息和平台用户数据目录 |
 | `app/storage.py` | 功能域注册、路径创建、原子 JSON 读写 |
@@ -272,7 +269,7 @@ ADB 工具
 
 ```bash
 PYTHONPYCACHEPREFIX=/private/tmp/glacien_pycache \
-  python3 -m py_compile codes/launcher.py codes/desktop_launcher.py \
+  python3 -m py_compile codes/desktop_launcher.py \
   codes/app/*.py codes/build_desktop.py codes/package_launcher.py
 
 node --check codes/web/app.js

@@ -13,7 +13,7 @@ Glacien 桌面进程
   -> 现有 /api/*、SSE、ADB 子进程
 ```
 
-桌面入口是 `codes/desktop_launcher.py`，窗口与下载、文件选择、进程生命周期在 `app/desktop.py`。原 `codes/launcher.py` 继续作为 Chrome/Edge 应用模式的兼容入口。
+桌面入口是 `codes/desktop_launcher.py`，窗口与下载、文件选择、进程生命周期在 `app/desktop.py`。产品不再提供浏览器应用模式入口。
 
 桌面版关闭最后一个窗口时停止其拥有的 HTTP Server。若配置端口已由另一个 Glacien 实例监听，新窗口复用该服务，不关闭原实例。端口属于其他程序时拒绝启动。`ThreadingHTTPServer.daemon_threads` 必须保持开启，避免断开的 SSE 请求线程阻塞桌面进程退出。
 

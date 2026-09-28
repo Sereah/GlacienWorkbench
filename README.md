@@ -2,9 +2,12 @@
 
 Glacien Workbench（Glacien 工作站）是面向程序员的本地开发工具平台。当前包含完整的 ADB 设备工具、离线日志分析和本地音频处理能力。
 
-## 前置条件
+## 使用者指南
 
-- 使用已构建的桌面包不需要额外安装 Python 或浏览器；只有源码运行和构建时才需要 Python 3.9 或更高版本。
+### 系统要求
+
+- 桌面应用已经包含 Python、PySide6 和 Qt WebEngine，不需要额外安装 Python 或浏览器。
+- Ubuntu / Debian 需要 Qt 的系统图形运行库。首次运行前请执行 `sudo apt update && sudo apt install libxcb-cursor0`；部分桌面发行版可能已经预装。
 - Android Platform-Tools：使用 ADB 工具前，电脑需要安装 `adb`。工作站会自动检查环境变量、系统 PATH 和三端标准 SDK 目录；也可在“ADB 首页 → 配置 SDK / ADB 路径”填写 SDK 根目录、`platform-tools` 目录或完整 `adb` 路径。
 - scrcpy：外部投屏功能使用系统安装的 scrcpy；工作站会自动探测，也允许在屏幕捕捉页配置可执行文件绝对路径，桌面包不内置 scrcpy。
 - 设备已通过 USB 或网络 ADB 连接，并完成调试授权。
@@ -30,37 +33,24 @@ Glacien Workbench（Glacien 工作站）是面向程序员的本地开发工具�
 
 安装后运行 `ffmpeg -version` 验证。裸 PCM 没有文件头，播放前需要在页面正确填写采样格式、采样率和通道数；当前多路模式按 interleaved 数据读取。
 
-## 启动
+### 启动桌面应用
 
-- macOS：双击“启动 Glacien.command”。
-- Windows：双击“启动 Glacien.bat”。
-- Ubuntu：运行 `python3 codes/launcher.py`。
+- macOS：打开 `Glacien.app`。
+- Windows：双击 `Glacien.exe`。
+- Linux：为 `Glacien` 添加可执行权限后运行。
 
-也可以在工具目录运行：
+Linux 命令示例：
 
 ```bash
-python3 codes/launcher.py
+chmod +x Glacien
+./Glacien
 ```
 
-启动后会优先使用 Chrome 或 Edge 的应用模式打开独立窗口，不显示地址栏和标签栏；未安装支持的 Chromium 浏览器时自动回退到系统默认浏览器。若配置端口已有 Glacien 在运行，会直接为已有实例打开独立窗口，不会重复启动或要求手动结束进程；若端口属于其他程序则拒绝复用。关闭实际承载服务的启动终端后工具停止。
+桌面应用会在本机启动仅监听 `127.0.0.1` 的服务，并在 Qt WebEngine 窗口中显示界面。若配置端口已有 Glacien 在运行，新窗口会复用已有实例；若端口被其他程序占用，应用会拒绝启动。
 
-安装桌面依赖后，也可以用 `python3 codes/desktop_launcher.py` 调试桌面入口。该命令只供开发使用；编译后的应用可直接运行，不需要任何启动脚本。桌面版使用 Qt WebEngine 显示相同前端，拥有独立的应用进程、窗口和图标，不会启动外部浏览器。
+### 页面使用
 
-### 构建桌面应用
-
-在对应系统的项目根目录直接点击所需构建脚本：
-
-| 系统 | 日常增量构建 | 清理缓存后全量构建 |
-| --- | --- | --- |
-| macOS | `增量构建 Glacien macOS.command` | `全量构建 Glacien macOS.command` |
-| Windows | `增量构建 Glacien Windows.bat` | `全量构建 Glacien Windows.bat` |
-| Linux | `增量构建 Glacien Linux.sh` | `全量构建 Glacien Linux.sh` |
-
-脚本会在 `.desktop-build-venv/` 创建隔离构建环境，首次运行或依赖清单变化时安装依赖，然后分别生成 `dist/Glacien.app`、`dist/Glacien.exe` 或 `dist/Glacien`。增量构建复用 PyInstaller 缓存，适合日常开发；正式发布或缓存异常时点击全量构建脚本。构建流程不再自动压缩发布包。PyInstaller 不能跨平台编译，三端需要分别执行构建。应用携带 Python、Qt WebEngine 和程序资源，不要求使用者安装 Python、PySide6、Chrome 或 Edge；详细结构、数据目录和回归项见 `codes/docs/desktop.md`。
-
-## 页面使用
-
-### 首页与 ADB 概览
+#### 首页与 ADB 概览
 
 1. 工作站首页展示产品说明和 `release.json` 中最新 3 个版本；存在更早记录时在列表末尾显示省略提示，完整历史仍保留在 `release.json`。点击“用户须知”会读取 `codes/用户须知.md`，并在可滚动弹窗中展示环境准备、操作安全和简明使用手册。功能入口统一放在左侧分组菜单中。
 2. 在“ADB 概览”确认 ADB 和设备状态。连接多台设备时，必须选择一台已授权设备后，才能安装 APK、部署资源、管理进程、发送广播、读取日志或执行自定义命令。工具不会默认操作列表中的第一台设备。
@@ -71,7 +61,7 @@ python3 codes/launcher.py
 7. ADB 首页管理 SDK 路径；设置页管理工作站服务端口。SDK 路径可留空，工作站会自动检查标准安装位置。
 8. APK、资源、签名和日志分别保存在系统用户数据目录的功能子目录中。设置页会显示数据根目录，并可直接用系统文件管理器打开。
 
-### 部署中心
+#### 部署中心
 
 - “部署中心”在同一页面提供“安装 APK”“签名 APK”“资源部署”三个 Tab，侧边栏不再为三级能力单独增加入口。
 - “安装 APK”页点击“上传 APK”添加到 `adb-tools/apk-center/files/`；可安装、删除、计算文件 MD5 / SHA-256，或通过 `apksigner` 读取签名证书 SHA-256。
@@ -82,14 +72,14 @@ python3 codes/launcher.py
 - “签名 APK”页点击“上传签名文件”添加 `.jks` 或 `.keystore`；签名文件保存在 `adb-tools/apk-center/keystores/`，密码只在本次请求中使用。
 - 在签名页选择签名文件、按需填写 Alias（仅多 key 文件需要），勾选 APK 并输入本次密码即可签名；密码不会保存。
 
-### 资源部署
+#### 资源部署
 
 - 从“部署中心 > 资源部署”进入，用户数据目录和后端接口保持不变。
 - 点击“上传资源”上传 `.tar.gz`；每个资源包在列表中单独填写并保存自己的设备部署目录。
 - 勾选后可批量推送，各资源包使用各自保存的目录；任何选中项没有路径时会拒绝执行。
 - 推送前工具会清理设备端同名顶层旧资源，请确认提示。
 
-### 进程管理
+#### 进程管理
 
 - 点击“配置进程”设置全局包名关键词。
 - 每个包名下会显示“系统签名：匹配 / 不匹配 / 未知”；状态来自设备上该应用与 `android` 包的签名摘要比对。
@@ -97,13 +87,13 @@ python3 codes/launcher.py
 - 卸载会删除设备端应用及其数据，页面会要求二次确认。
 - 进程管理可临时 Pull 已安装包的 `base.apk`，通过本机 `apksigner` 读取签名证书 SHA-256。临时 APK 验签后立即删除。
 
-### 发送广播
+#### 发送广播
 
 - 从“ADB 命令 > 发送广播”进入，与“自定义命令”处于同一功能页的 Tab。
 - 填写 Action、可选目标包名和 Extras 后发送。
 - 使用“新建广播”创建预设；选择器只显示已保存广播。
 
-### 实时日志
+#### 实时日志
 
 - 先新建或选择一条已保存日志规则，配置整体过滤词和六色高亮词；未保存规则不能启动实时日志。
 - 可选填写完整 Android 进程名（例如 `com.example.app` 或 `com.example.app:service`），工具会在开始监听时解析当前 PID，只显示该进程命中的日志。目标进程必须已运行；进程重启后需重新开始监听。
@@ -112,14 +102,14 @@ python3 codes/launcher.py
 - “清空显示”只清除浏览器页面，ADB 未连接时也可使用，并且不会停止正在进行的监听；“清空日志”会同时清空页面和当前设备的全部 Logcat 缓冲区，若当时正在监听，清理完成后会自动恢复当前过滤方案。
 - 仅可保存当前已保存规则匹配的日志，不再提供“全部日志”入口，避免全量 Logcat 导致浏览器卡顿。
 
-### 设备日志 Pull
+#### 设备日志 Pull
 
 - 从“设备工具 > 日志 Pull”进入，按 `adb-tools/device-logs/sources.json` 中的命名日志源扫描设备目录。
 - 开始时间和结束时间均为可选。不填写时展示全部符合文件匹配规则的日志包；填写后只展示并默认勾选可靠时间与范围相交的文件。若自动识别对整个来源均失败，则展示全部文件供手动选择。
 - 不同车机可在“管理日志源”中配置目录、文件匹配和归档类型；时间默认可自动识别常见文件名，无需填写正则。识别不到时文件仍会展示并可手动勾选，也可使用设备修改时间或高级自定义规则。
 - 每次 Pull 在系统下载目录创建 `device-logs-<当前时间>/`，选中的日志直接放入其中且不生成 manifest JSON；gzip 可选择 Pull 后自动解压。
 
-### 设备工具
+#### 设备工具
 
 - “设备工具”提供“屏幕捕获”“设备文件”“日志 Pull”三个 Tab。
 - “设备工具”的“屏幕捕获”使用共享 Display 选择，并以页签提供单次/连续截图、屏幕录制、外部 scrcpy 投屏和历史截图滑块对比；各能力按需显示，避免同时堆叠导致页面过高。
@@ -131,22 +121,22 @@ python3 codes/launcher.py
 - `adb-tools/device-tools/` 中的截图、录屏和下载都位于系统用户数据目录，不进入源码包或桌面应用包。
 - “设备文件”提供类似 Android Studio Device Explorer 的目录浏览；支持新建文件夹、新建 UTF-8 文本文件、悬浮窗文本预览，以及上传单文件或保留相对层级上传整个文件夹。大文件仅预览前 256 KiB，二进制文件只显示识别类型并可继续 Pull。列表支持逐项选择、全选、批量删除，以及把选中的文件和文件夹批量 Pull 为一个 zip；Pull 结果固定保存于 `adb-tools/device-tools/downloads/`。
 
-### 离线日志
+#### 离线日志
 
-- “高速本地目录（rg）”：桌面版点击“选择目录”即可使用系统目录选择器，无需通过终端取得绝对路径；浏览器启动模式仍可手工填写。适合多 GiB 日志；未安装 `rg` 时高速模式会禁用并提示。
+- “高速本地目录（rg）”：点击“选择目录”即可使用系统目录选择器，无需通过终端取得绝对路径。适合多 GiB 日志；未安装 `rg` 时高速模式会禁用并提示。
 - 保存高速日志目录时会检测 `.gz`、`.zip`、`.tar`、`.tar.gz` 和 `.tgz` 并请求确认；完整解压成功后删除原压缩包，由展开内容替换它。冲突或校验失败时保留原包且不留下部分文件；开始过滤只执行 rg 扫描。
 - “浏览器文件夹”：切换模式后在页面选择文件夹，日志只在浏览器本地读取。
 - 使用连续条件“包含任一 / 包含全部 / 排除任一”缩小结果，可上色、分页显示并另存。
 - 可保存和导入离线分析方案；方案不保存日志正文、本机目录或导出文件名。
 
-### 音频处理
+#### 音频处理
 
 - 从“本地工具 → 音频处理”导入 `.pcm`、`.raw` 或无扩展名的裸 PCM 文件。
 - 正确选择采样格式、采样率和 1-32 路通道数后，可生成浏览器可播放的 WAV 预览。
 - 多路 PCM 当前按 interleaved 布局读取；可以将全部通道下混为立体声，也可以提取指定通道作为单声道播放。
 - PCM 输入与预览保存在用户数据目录；预览属于可再生缓存，自动保留最近 20 个。
 
-### ADB 命令
+#### ADB 命令
 
 - “ADB 命令”提供“自定义命令”和“发送广播”两个 Tab；自定义命令编辑草稿在切换 Tab 或离开页面时继续受到丢弃确认保护。
 - “临时输入”只用于直接执行一条完整 Android 设备端命令，例如 `pm`、`wm`、`dumpsys`、`settings` 和 `logcat -d`；不要输入 `adb` 或 `shell` 前缀。临时输入不提供变量和超时设置。
@@ -155,7 +145,7 @@ python3 codes/launcher.py
 - “新建命令”和“编辑当前”在弹窗中维护模板、说明、分类和超时；编辑保存后会自动作为当前已选命令执行。
 - 高风险命令会在执行前要求二次确认；结果可下载为文本。
 
-### 设置与规则分享
+#### 设置与规则分享
 
 - 设置页只维护全局端口、Android SDK 路径、用户数据目录和规则包导入导出。
 - 全局启动配置保存在 `app/config.json`，ADB 路径保存在 `adb-tools/adb/config.json`；各功能配置分别保存在自己的 JSON，不再有 `settings.<方案名>.json`。
@@ -166,7 +156,7 @@ python3 codes/launcher.py
 - 用户配置按不可变的稳定功能 key 分域保存，页面改名、菜单重组和 Tab 调整不会改变数据位置。每个域独立维护 `schema_version`；升级旧结构前会将原 JSON 备份到 `runtime/migration-backups/`，高于当前程序的数据版本会被拒绝回写。配置修改只更新所属域，避免一个功能保存时覆盖其他功能数据。
 - 自定义命令导出格式为 v2，每条命令包含与名称分离的永久 ID；导入其他用户的数据时，相同 ID/内容会去重，同名但内容不同的命令会重命名后并存。规则包按稳定功能 key 分区，继续兼容 v1，未知的新功能分区会跳过并报告。
 
-## 安全说明
+### 安全说明
 
 - 服务只监听 `127.0.0.1`。
 - 多设备时，每条设备命令都会由后端按 ADB 首页选择的序列号附加 `adb -s <serial>`；未选择设备时后端拒绝执行，避免误操作第一台设备。
@@ -174,25 +164,53 @@ python3 codes/launcher.py
 - 删除 APK、资源、签名文件和卸载应用均有明确确认。
 - APK、资源、Keystore 和日志分别位于各自功能目录，与应用程序本体隔离。
 
-## 常见问题
+### 常见问题
 
 - 找不到 ADB：工具会检查 `ANDROID_SDK_ROOT`、`ANDROID_HOME`、系统 PATH，以及 macOS `~/Library/Android/sdk`、Windows `%LOCALAPPDATA%\Android\Sdk`、Linux `~/Android/Sdk`。仍未找到时，可填写 SDK 根目录、`platform-tools` 目录或完整 `adb` 路径。
+- Linux 启动时报 `Could not load the Qt platform plugin "xcb"`：Ubuntu / Debian 执行 `sudo apt update && sudo apt install libxcb-cursor0` 后重试。
 - 多台设备时无法操作：回到“ADB 首页”，在“选择要操作的设备”中选择状态为 `device` 的设备；`offline` 或 `unauthorized` 的设备需要重新连接或在设备端确认调试授权。
 - 高速离线日志不可用：确认已安装 `rg`，并在“离线日志 → 配置目录”填写存在的绝对目录。
 - 签名不可用：确认已上传并选中签名文件；多 key 文件再填写 Alias，并输入本次使用的两个密码。
 - 设备未显示：重新授权 USB 调试后点击“刷新状态”。
 
-## 打包
+## 开发者指南
 
-### 首次安装包
+源码开发和桌面构建需要 Python 3.9 或更高版本。产品面向使用者只提供桌面应用，不再将浏览器前后端启动模式作为使用方式。
 
-需要分发工具程序时运行：
+### 源码调试
+
+安装桌面开发依赖后运行 Qt WebEngine 桌面入口：
+
+```bash
+python3 -m pip install -r requirements-desktop.txt
+python3 codes/desktop_launcher.py
+```
+
+源码调试与打包后的桌面应用使用相同的前端、HTTP API 和 SSE 链路。服务始终只监听 `127.0.0.1`。
+
+### 构建桌面应用
+
+在对应系统的项目根目录直接点击所需构建脚本：
+
+| 系统 | 日常增量构建 | 清理缓存后全量构建 |
+| --- | --- | --- |
+| macOS | `增量构建 Glacien macOS.command` | `全量构建 Glacien macOS.command` |
+| Windows | `增量构建 Glacien Windows.bat` | `全量构建 Glacien Windows.bat` |
+| Linux | `增量构建 Glacien Linux.sh` | `全量构建 Glacien Linux.sh` |
+
+脚本会在 `.desktop-build-venv/` 创建隔离构建环境，首次运行或依赖清单变化时安装依赖，然后分别生成 `dist/Glacien.app`、`dist/Glacien.exe` 或 `dist/Glacien`。增量构建复用 PyInstaller 缓存，适合日常开发；正式发布或缓存异常时使用全量构建。构建流程不自动生成发布压缩包。
+
+PyInstaller 不能跨平台编译，三端需要分别构建。Linux 产物还应在与目标系统 glibc 基线兼容的干净环境中验证系统图形依赖。详细结构、交付方式和回归项见 `codes/docs/desktop.md`。
+
+### 归档源码
+
+需要归档或共享源码时运行：
 
 ```bash
 python3 codes/package_launcher.py
 ```
 
-生成的源码包保留只读 `defaults.json`，排除所有系统用户数据、构建虚拟环境以及 `build/`、`dist/`。首次启动时自动创建功能目录和 JSON。
+生成的源码包保留只读 `defaults.json`，排除所有系统用户数据、构建虚拟环境以及 `build/`、`dist/`。源码包不是面向使用者的桌面安装包。
 
 当前版本固定为 `0.3.4`。暂不提供升级包、自动递增或应用内升级；历史版本记录由 `release.json` 维护，需要发布时重新构建并分发完整桌面应用。用户数据位于系统应用数据目录，与应用本体分离。
 
