@@ -1,0 +1,11 @@
+Package: glacien-workbench
+Version: {{VERSION}}
+Section: devel
+Priority: optional
+Architecture: {{ARCHITECTURE}}
+Maintainer: Glacien
+Installed-Size: {{INSTALLED_SIZE}}
+Depends: {{DEPENDS}}
+Description: Glacien Workbench desktop application
+ A local Android development workstation with ADB device tools,
+ offline log analysis and audio processing capabilities.

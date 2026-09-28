@@ -75,7 +75,8 @@ Run from repository root:
 ```bash
 PYTHONPYCACHEPREFIX=/private/tmp/glacien_pycache \
   python3 -m py_compile codes/desktop_launcher.py \
-  codes/app/*.py codes/build_desktop.py codes/package_launcher.py
+  codes/app/*.py codes/build_desktop.py codes/package_launcher.py \
+  codes/package_linux_deb.py
 
 node --check codes/web/app.js
 python3 -m json.tool defaults.json

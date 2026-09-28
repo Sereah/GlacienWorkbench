@@ -1,0 +1,2 @@
+# 每行一个 Debian 运行依赖，可使用版本约束，例如：package-name (>= 1.2.3)
+libxcb-cursor0

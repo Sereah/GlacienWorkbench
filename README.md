@@ -39,6 +39,12 @@ Glacien Workbench（Glacien 工作站）是面向程序员的本地开发工具�
 - Windows：双击 `Glacien.exe`。
 - Linux：为 `Glacien` 添加可执行权限后运行。
 
+Ubuntu / Debian 用户也可以安装 `.deb`，APT 会自动跳过已经满足的依赖，并补装缺失依赖：
+
+```bash
+sudo apt install ./glacien-workbench_<版本>_<架构>.deb
+```
+
 Linux 命令示例：
 
 ```bash
@@ -201,6 +207,14 @@ python3 codes/desktop_launcher.py
 脚本会在 `.desktop-build-venv/` 创建隔离构建环境，首次运行或依赖清单变化时安装依赖，然后分别生成 `dist/Glacien.app`、`dist/Glacien.exe` 或 `dist/Glacien`。增量构建复用 PyInstaller 缓存，适合日常开发；正式发布或缓存异常时使用全量构建。构建流程不自动生成发布压缩包。
 
 PyInstaller 不能跨平台编译，三端需要分别构建。Linux 产物还应在与目标系统 glibc 基线兼容的干净环境中验证系统图形依赖。详细结构、交付方式和回归项见 `codes/docs/desktop.md`。
+
+Linux 正式发布时运行：
+
+```bash
+./构建\ Glacien\ Linux\ DEB.sh
+```
+
+该脚本先执行 Linux 全量构建，再输出 `release-output/glacien-workbench_<版本>_<架构>.deb`。DEB 运行依赖集中配置在 `codes/packaging/linux/dependencies.txt`，每行一个包名；新增依赖无需修改打包代码。系统已经安装且版本满足的依赖不会被覆盖或重复安装。
 
 ### 归档源码
 

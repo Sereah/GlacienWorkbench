@@ -98,6 +98,7 @@ ADB 工具
 | `用户须知.md` | 应用内用户须知 |
 | `build_desktop.py` | PyInstaller 桌面构建 |
 | `package_launcher.py` | 源码分发包生成 |
+| `package_linux_deb.py`、`packaging/linux/` | Linux DEB 组装与运行依赖配置 |
 | `defaults.json` | 新用户数据的只读初始化种子 |
 | `release.json` | 当前版本和首页更新记录 |
 
@@ -270,7 +271,8 @@ ADB 工具
 ```bash
 PYTHONPYCACHEPREFIX=/private/tmp/glacien_pycache \
   python3 -m py_compile codes/desktop_launcher.py \
-  codes/app/*.py codes/build_desktop.py codes/package_launcher.py
+  codes/app/*.py codes/build_desktop.py codes/package_launcher.py \
+  codes/package_linux_deb.py
 
 node --check codes/web/app.js
 python3 -m json.tool defaults.json

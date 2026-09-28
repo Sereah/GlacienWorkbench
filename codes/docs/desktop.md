@@ -41,6 +41,8 @@ PyInstaller 不支持跨平台编译；必须在目标操作系统点击对应�
 
 构建日志会分别输出 PyInstaller、macOS 临时签名和总耗时。构建流程只生成桌面应用，不自动压缩 ZIP。
 
+Linux 正式发布可运行根目录的 `构建 Glacien Linux DEB.sh`。脚本先执行全量桌面构建，再通过 `codes/package_linux_deb.py` 生成 `release-output/glacien-workbench_<版本>_<架构>.deb`。Debian 运行依赖由 `codes/packaging/linux/dependencies.txt` 集中维护，每行一个依赖；`control.template` 在打包时注入 `release.json` 版本、当前 dpkg 架构、安装体积和依赖列表。用户使用 `apt install ./<包名>.deb` 安装时，APT 会保留已满足的依赖并自动补装缺失依赖。
+
 产物：
 
 - macOS：`dist/Glacien.app`
@@ -49,7 +51,7 @@ PyInstaller 不支持跨平台编译；必须在目标操作系统点击对应�
 
 macOS 使用标准 `.app` Bundle；Windows 和 Linux 使用 onefile。Qt WebEngine 会产生受主程序管理的渲染辅助进程，这是 Chromium 多进程模型的一部分，不会启动外部浏览器。
 
-交付时 macOS 应将整个 `Glacien.app` 压缩后发送，不能只发送 `Contents/MacOS/Glacien`；Windows 可直接发送 `Glacien.exe`；Linux 可直接发送 `Glacien`，但应在与目标发行版兼容的 glibc 环境中构建并保留可执行权限。
+交付时 macOS 应将整个 `Glacien.app` 压缩后发送，不能只发送 `Contents/MacOS/Glacien`；Windows 可直接发送 `Glacien.exe`；Linux 推荐发送 `.deb`，也可直接发送 `Glacien`，但裸文件需要用户自行安装系统依赖并保留可执行权限。Linux 产物应在与目标发行版兼容的 glibc 环境中构建。
 
 构建机架构决定产物架构。macOS arm64 和 x86_64、Linux 不同 glibc 基线应分别使用对应构建机；Windows 也应在目标架构环境构建。正式对外发布时还需为 macOS 签名/公证，为 Windows 进行代码签名。
 
