@@ -4,6 +4,7 @@ Name=Glacien Workbench
 Comment=Android development workstation
 Exec=/opt/glacien-workbench/Glacien
 Icon=glacien-workbench
+StartupWMClass=Glacien
 Terminal=false
 Categories=Development;
 StartupNotify=true

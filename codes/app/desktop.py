@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QObject, QStandardPaths, QUrl, Slot
-from PySide6.QtGui import QDesktopServices, QIcon
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QIcon
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
@@ -114,6 +114,9 @@ def run() -> int:
             pass
     QCoreApplication.setOrganizationName("Glacien")
     QCoreApplication.setApplicationName("Glacien")
+    if sys.platform.startswith("linux"):
+        # 让 Wayland/GNOME 将运行窗口关联到安装的 .desktop 文件和应用图标。
+        QGuiApplication.setDesktopFileName("glacien-workbench")
     app = QApplication(sys.argv)
     icon_path = runtime.resource_path("assets/glacien.svg")
     if icon_path.is_file():

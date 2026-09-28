@@ -12,6 +12,19 @@ SPEC.loader.exec_module(package_linux_deb)
 
 
 class LinuxDebPackageTest(unittest.TestCase):
+    def test_desktop_entry_matches_linux_window_identity(self):
+        desktop_file = (
+            Path(__file__).resolve().parents[1]
+            / "codes"
+            / "packaging"
+            / "linux"
+            / "glacien-workbench.desktop"
+        )
+        content = desktop_file.read_text(encoding="utf-8")
+
+        self.assertIn("Icon=glacien-workbench\n", content)
+        self.assertIn("StartupWMClass=Glacien\n", content)
+
     def test_reads_dependencies_and_ignores_comments_and_duplicates(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "dependencies.txt"
