@@ -68,6 +68,23 @@ class StorageCompatibilityTest(unittest.TestCase):
         )
         self.assertEqual(1, len(list((storage.ROOT / "runtime/migration-backups").rglob("processes/config.json"))))
 
+    def test_offline_log_sources_upgrade_without_losing_directory_paths(self):
+        path = storage.path("offline_logs")
+        path.write_text(json.dumps({
+            "storage_key": "offline_logs",
+            "schema_version": 1,
+            "offline_filter_presets": {"errors": {"filters": []}},
+            "offline_log_sources": {"runlog": "/tmp/runlog"},
+            "unknown_future_field": {"keep": True},
+        }), encoding="utf-8")
+
+        value = storage.read("offline_logs", storage.default("offline_logs"))
+
+        self.assertEqual(2, value["schema_version"])
+        self.assertEqual({"runlog": "/tmp/runlog"}, value["offline_log_sources"])
+        self.assertEqual({"keep": True}, value["unknown_future_field"])
+        self.assertEqual(1, len(list((storage.ROOT / "runtime/migration-backups").rglob("offline-logs/config.json"))))
+
     def test_process_launch_command_is_restricted(self):
         self.assertEqual(
             ["am", "start", "-n", "com.example/.MainActivity"],

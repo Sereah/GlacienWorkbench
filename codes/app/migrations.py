@@ -75,6 +75,14 @@ def _processes_v1_to_v2(value: dict) -> dict:
     return {**value, "app_launches": migrated}
 
 
+def _offline_logs_v1_to_v2(value: dict) -> dict:
+    """保留现有目录来源；v2 将同一绝对路径字段扩展为文件或目录。"""
+    sources = value.get("offline_log_sources", {})
+    if not isinstance(sources, dict):
+        raise ValueError("offline_logs.offline_log_sources 必须是对象")
+    return value
+
+
 def normalize(feature: str, value: dict) -> dict:
     """修复当前 schema 下可安全补齐的字段，不改变既有业务含义。"""
     if feature == "processes":
@@ -114,6 +122,7 @@ def normalize(feature: str, value: dict) -> dict:
 MIGRATIONS = {
     "commands": {1: _commands_v1_to_v2},
     "processes": {1: _processes_v1_to_v2},
+    "offline_logs": {1: _offline_logs_v1_to_v2},
 }
 
 

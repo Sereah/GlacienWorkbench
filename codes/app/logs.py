@@ -60,24 +60,39 @@ def capability() -> dict:
     executable = rg_executable()
     return {"available": bool(executable), "path": executable or ""}
 
+def _source_status(path: Path) -> tuple[bool, str, str]:
+    if path.is_dir():
+        return True, "directory", ""
+    if path.is_file() and _archive_kind(path):
+        return False, "archive", "压缩日志请配置其所在文件夹，以便安全解压"
+    if path.is_file():
+        return True, "file", ""
+    return False, "missing", "文件或文件夹不可用"
+
+
 def sources(settings: dict) -> list[dict]:
-    """列出当前配置中已保存的日志目录来源，不接受浏览器路径参数。"""
+    """列出已保存的日志文件或目录来源，不接受浏览器路径参数。"""
     result = []
     for name, raw_path in settings.get("offline_log_sources", {}).items():
-        folder = Path(str(raw_path)).expanduser()
-        result.append({"name": str(name), "path": str(folder), "available": folder.is_dir()})
+        path = Path(str(raw_path)).expanduser()
+        available, kind, error = _source_status(path)
+        result.append({"name": str(name), "path": str(path), "available": available, "kind": kind, "error": error})
     return sorted(result, key=lambda item: item["name"])
 
 def source_path(settings: dict, name: object) -> tuple[str, Path]:
-    """按来源名称重建当前 settings 白名单中的目录，拒绝未保存路径。"""
+    """按来源名称重建当前 settings 白名单中的文件或目录，拒绝未保存路径。"""
     clean_name = str(name or "").strip()
     raw_path = settings.get("offline_log_sources", {}).get(clean_name)
     if not clean_name or not raw_path:
         raise ValueError("请选择当前配置中已保存的日志来源")
-    folder = Path(str(raw_path)).expanduser().resolve()
-    if not folder.is_dir():
-        raise ValueError(f"日志来源目录不可用：{folder}")
-    return clean_name, folder
+    path = Path(str(raw_path)).expanduser().resolve()
+    available, kind, error = _source_status(path)
+    if not available:
+        detail = error or "文件或文件夹不可用"
+        raise ValueError(f"日志来源不可用：{path}（{detail}）")
+    if kind not in {"file", "directory"}:
+        raise ValueError(f"日志来源类型不受支持：{path}")
+    return clean_name, path
 
 def _archive_kind(path: Path) -> Optional[str]:
     lower = path.name.lower()
@@ -176,8 +191,10 @@ def _extract_gzip(archive: Path, destination: Path) -> int:
             output.write(chunk)
     return 1
 
-def _archives(folder: Path) -> list[Path]:
-    return sorted(path for path in folder.rglob("*") if path.is_file() and not path.is_symlink() and _archive_kind(path))
+def _archives(source: Path) -> list[Path]:
+    if not source.is_dir():
+        return []
+    return sorted(path for path in source.rglob("*") if path.is_file() and not path.is_symlink() and _archive_kind(path))
 
 def archive_status(settings: dict, source: object) -> dict:
     source_name, folder = source_path(settings, source)
@@ -289,13 +306,13 @@ def pcre_pattern(filters: list[dict]) -> str:
     return "(?i)^" + "".join(clauses) + ".*$"
 
 def query(settings: dict, body: dict) -> dict:
-    """用 rg --json 查询受配置白名单约束的目录，返回匹配行及来源行号。"""
-    source_name, folder = source_path(settings, body.get("source"))
+    """用 rg --json 查询受配置白名单约束的文件或目录，返回匹配行及来源行号。"""
+    source_name, source = source_path(settings, body.get("source"))
     filters = normalize_filters(body.get("filters"))
     executable = rg_executable()
     if not executable:
         raise ValueError("未找到 rg（ripgrep），无法使用高速离线扫描")
-    command = [executable, "--json", "--pcre2", "--color", "never", "--hidden", "--no-ignore", "--glob", "!.git", "--glob", "!*.zip", "--glob", "!*.gz", "--glob", "!*.tgz", "--glob", "!*.tar", "--", pcre_pattern(filters), str(folder)]
+    command = [executable, "--json", "--pcre2", "--color", "never", "--hidden", "--no-ignore", "--glob", "!.git", "--glob", "!*.zip", "--glob", "!*.gz", "--glob", "!*.tgz", "--glob", "!*.tar", "--", pcre_pattern(filters), str(source)]
     started = time.monotonic()
     try:
         process = proc.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=QUERY_TIMEOUT_SECONDS, check=False)
@@ -316,9 +333,12 @@ def query(settings: dict, body: dict) -> dict:
         line_data = data.get("lines", {})
         file_path = path_data.get("text") or path_data.get("bytes", "")
         text = (line_data.get("text") or "").rstrip("\r\n")
-        try:
-            relative = str(Path(file_path).resolve().relative_to(folder))
-        except ValueError:
-            relative = str(file_path)
+        if source.is_file():
+            relative = source.name
+        else:
+            try:
+                relative = str(Path(file_path).resolve().relative_to(source))
+            except ValueError:
+                relative = str(file_path)
         results.append({"file": relative, "line": data.get("line_number", 0), "text": text})
-    return {"source": source_name, "path": str(folder), "results": results, "elapsed_seconds": round(time.monotonic() - started, 3)}
+    return {"source": source_name, "path": str(source), "results": results, "elapsed_seconds": round(time.monotonic() - started, 3)}

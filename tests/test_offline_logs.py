@@ -1,10 +1,13 @@
 import gzip
 import io
+import json
+import subprocess
 import tarfile
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 from codes.app import logs
 
 
@@ -20,6 +23,53 @@ class OfflineLogArchiveTest(unittest.TestCase):
 
     def settings(self):
         return {"offline_log_sources": {"test": str(self.source)}}
+
+    def test_plain_file_is_available_source(self):
+        log_file = self.source / "single.log"
+        log_file.write_text("needle\n", encoding="utf-8")
+
+        result = logs.sources({"offline_log_sources": {"single": str(log_file)}})
+
+        self.assertEqual("file", result[0]["kind"])
+        self.assertTrue(result[0]["available"])
+        self.assertEqual(("single", log_file.resolve()), logs.source_path(
+            {"offline_log_sources": {"single": str(log_file)}}, "single"
+        ))
+
+    def test_single_archive_requires_selecting_parent_directory(self):
+        archive = self.source / "single.log.gz"
+        with gzip.open(archive, "wb") as output:
+            output.write(b"needle\n")
+
+        result = logs.sources({"offline_log_sources": {"single": str(archive)}})
+
+        self.assertFalse(result[0]["available"])
+        self.assertEqual("archive", result[0]["kind"])
+        with self.assertRaisesRegex(ValueError, "所在文件夹"):
+            logs.source_path({"offline_log_sources": {"single": str(archive)}}, "single")
+
+    def test_query_single_file_uses_filename_in_results(self):
+        log_file = self.source / "single.log"
+        log_file.write_text("needle\n", encoding="utf-8")
+        event = {
+            "type": "match",
+            "data": {
+                "path": {"text": str(log_file)},
+                "lines": {"text": "needle\n"},
+                "line_number": 1,
+            },
+        }
+        completed = subprocess.CompletedProcess([], 0, json.dumps(event), "")
+
+        with patch.object(logs, "rg_executable", return_value="/usr/bin/rg"), \
+                patch.object(logs.proc, "run", return_value=completed) as run:
+            result = logs.query(
+                {"offline_log_sources": {"single": str(log_file)}},
+                {"source": "single", "filters": [{"mode": "include_any", "terms": ["needle"]}]},
+            )
+
+        self.assertEqual("single.log", result["results"][0]["file"])
+        self.assertEqual(str(log_file.resolve()), run.call_args.args[0][-1])
 
     def test_extracts_gzip_into_archive_directory_and_skips_conflict(self):
         archive = self.source / "system.log.gz"

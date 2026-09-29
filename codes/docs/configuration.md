@@ -65,6 +65,7 @@ GlacienWorkbench/
 - 业务保存使用 `storage.update()`，HTTP 使用 `POST /api/config/domain`，一次只修改一个域并保留未知字段。`GET /api/config` 继续提供前端聚合视图，但不再接受聚合保存。
 - 当前 `commands` schema 为 v2，每条自定义命令都有独立 `id`；名称和分类可修改，ID 不变。旧 v1 命令会在首次读取时补 ID。
 - 当前 `processes` schema 为 v2，每个包的拉起入口保存为 `app_launches.<package>.command`。旧 v1 的 action、component、activity 和 extras 会在备份后转换成等价的 `am start` 命令。
+- 当前 `offline_logs` schema 为 v2，`offline_log_sources` 的绝对路径既可指向日志文件，也可指向日志目录；旧 v1 目录来源会无损保留。
 
 页面调整不触发数据迁移。例如部署中心改名或移动 Tab 仍使用 `apk_center`，日志 Pull 移入设备工具仍使用 `device_logs`，截图和录屏调整布局仍使用 `captures`。只有持久化数据结构变化才提升对应 schema。
 

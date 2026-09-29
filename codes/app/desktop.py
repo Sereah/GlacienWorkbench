@@ -23,12 +23,21 @@ MINIMUM_SIZE = (1080, 680)
 
 
 class DesktopBridge(QObject):
-    """只把用户在原生对话框中明确选择的目录交给受信 Web 页面。"""
+    """只把用户在原生对话框中明确选择的日志来源交给受信 Web 页面。"""
 
     @Slot(str, result=str)
     def choose_directory(self, initial_directory: str = "") -> str:
         initial = initial_directory if Path(initial_directory).is_dir() else ""
         return QFileDialog.getExistingDirectory(None, "选择离线日志目录", initial)
+
+    @Slot(str, result=str)
+    def choose_file(self, initial_path: str = "") -> str:
+        initial = ""
+        if initial_path:
+            candidate = Path(initial_path)
+            initial = str(candidate if candidate.is_file() else candidate.parent if candidate.parent.is_dir() else "")
+        selected, _ = QFileDialog.getOpenFileName(None, "选择离线日志文件", initial)
+        return selected
 
 
 class GlacienPage(QWebEnginePage):
