@@ -9,7 +9,7 @@ Glacien Workbench（Glacien 工作站）是面向程序员的本地开发工具�
 - 桌面应用已经包含 Python、PySide6 和 Qt WebEngine，不需要额外安装 Python 或浏览器。
 - Ubuntu / Debian 需要 Qt 的系统图形运行库。首次运行前请执行 `sudo apt update && sudo apt install libxcb-cursor0`；部分桌面发行版可能已经预装。
 - Android Platform-Tools：使用 ADB 工具前，电脑需要安装 `adb`。工作站会自动检查环境变量、系统 PATH 和三端标准 SDK 目录；也可在“ADB 首页 → 配置 SDK / ADB 路径”填写 SDK 根目录、`platform-tools` 目录或完整 `adb` 路径。
-- scrcpy：外部投屏功能使用系统安装的 scrcpy；工作站会自动探测，也允许在屏幕捕捉页配置可执行文件绝对路径，桌面包不内置 scrcpy。
+- scrcpy：外部投屏和有声录屏使用系统安装的 scrcpy；工作站会自动探测，也允许在屏幕捕捉页配置可执行文件绝对路径，桌面包不内置 scrcpy。
 - 设备已通过 USB 或网络 ADB 连接，并完成调试授权。
 - APK 签名需要 Android SDK Build-Tools 中的 `apksigner`；`zipalign` 推荐安装。
 - 使用“高速本地来源（rg）”离线日志模式时需要 `rg`（ripgrep）；浏览器文件/文件夹模式不需要。
@@ -35,9 +35,9 @@ Glacien Workbench（Glacien 工作站）是面向程序员的本地开发工具�
 
 ### 启动桌面应用
 
-- macOS：打开 `Glacien.app`。
-- Windows：双击 `Glacien.exe`。
-- Linux：为 `Glacien` 添加可执行权限后运行。
+- macOS：打开 `Glacien-<版本>.app`。
+- Windows：双击 `Glacien-<版本>.exe`。
+- Linux：为 `Glacien-<版本>` 添加可执行权限后运行。
 
 Ubuntu / Debian 用户也可以安装 `.deb`，APT 会自动跳过已经满足的依赖，并补装缺失依赖：
 
@@ -121,7 +121,7 @@ chmod +x Glacien
 - “设备工具”的“屏幕捕获”使用共享 Display 选择，并以页签提供单次/连续截图、屏幕录制、外部 scrcpy 投屏和历史截图滑块对比；各能力按需显示，避免同时堆叠导致页面过高。
 - 截图保存到 `adb-tools/device-tools/screenshots/`，完成后可预览、复制图片、下载或进入媒体库管理。
 - 媒体库支持逐项选择、全选当前已加载列表和批量删除；每个文件仍由后端重新验证受控 ID，录屏删除时同步清理封面。
-- 录屏保存到 `adb-tools/device-tools/recordings/`，支持分辨率、码率、最长时间、Display ID 和 bugreport overlay；完成后可播放、下载或进入媒体库管理。
+- 录屏保存到 `adb-tools/device-tools/recordings/`，可选择 Android 原生无声录制、scrcpy 摄像收音或 scrcpy 麦克风与设备播放混合收音；支持分辨率、码率、最长时间和 Display ID，原生模式还支持 bugreport overlay。完成后可播放、下载或进入媒体库管理。
 - 媒体库是纯 Web 文件管理界面，在 macOS、Ubuntu 和 Windows 使用同一逻辑；支持全部/截图/录屏筛选、按需预览、下载、复制截图和二次确认删除。
 - 设备工具主页面采用紧凑双卡片布局，截图和录屏的大预览只在弹窗中显示，完成捕获后自动打开。
 - `adb-tools/device-tools/` 中的截图、录屏和下载都位于系统用户数据目录，不进入源码包或桌面应用包。
@@ -204,7 +204,7 @@ python3 codes/desktop_launcher.py
 | Windows | `增量构建 Glacien Windows.bat` | `全量构建 Glacien Windows.bat` |
 | Linux | `增量构建 Glacien Linux.sh` | `全量构建 Glacien Linux.sh` |
 
-脚本会在 `.desktop-build-venv/` 创建隔离构建环境，首次运行或依赖清单变化时安装依赖，然后分别生成 `dist/Glacien.app`、`dist/Glacien.exe` 或 `dist/Glacien`。增量构建复用 PyInstaller 缓存，适合日常开发；正式发布或缓存异常时使用全量构建。构建流程不自动生成发布压缩包。
+脚本会在 `.desktop-build-venv/` 创建隔离构建环境，首次运行或依赖清单变化时安装依赖，然后按 `release.json` 版本分别生成 `dist/Glacien-<版本>.app`、`dist/Glacien-<版本>.exe` 或 `dist/Glacien-<版本>`。增量构建复用 PyInstaller 缓存，适合日常开发；正式发布或缓存异常时使用全量构建。构建流程不自动生成发布压缩包。
 
 PyInstaller 不能跨平台编译，三端需要分别构建。Linux 产物还应在与目标系统 glibc 基线兼容的干净环境中验证系统图形依赖。详细结构、交付方式和回归项见 `codes/docs/desktop.md`。
 
@@ -226,5 +226,5 @@ python3 codes/package_launcher.py
 
 生成的源码包保留只读 `defaults.json`，排除所有系统用户数据、构建虚拟环境以及 `build/`、`dist/`。源码包不是面向使用者的桌面安装包。
 
-当前版本固定为 `0.3.5`。暂不提供升级包、自动递增或应用内升级；历史版本记录由 `release.json` 维护，需要发布时重新构建并分发完整桌面应用。用户数据位于系统应用数据目录，与应用本体分离。
+当前版本固定为 `0.3.6`。暂不提供升级包、自动递增或应用内升级；历史版本记录由 `release.json` 维护，需要发布时重新构建并分发完整桌面应用。用户数据位于系统应用数据目录，与应用本体分离。
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# 在 Linux 本机清理缓存后构建 dist/Glacien。
+# 在 Linux 本机清理缓存后构建 dist/Glacien-<版本>。
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -11,4 +11,4 @@ if [ ! -x "${BUILD_VENV}/bin/python" ]; then
 fi
 "${BUILD_VENV}/bin/python" codes/prepare_desktop_build.py
 "${BUILD_VENV}/bin/python" codes/build_desktop.py --clean
-printf '%s\n' "Clean build completed: ${SCRIPT_DIR}/dist/Glacien"
+printf '%s\n' "Clean build completed: ${SCRIPT_DIR}/dist (artifact name includes the release.json version)"

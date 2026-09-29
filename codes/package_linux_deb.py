@@ -14,7 +14,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGING_ROOT = ROOT / "codes" / "packaging" / "linux"
-EXECUTABLE = ROOT / "dist" / "Glacien"
 ICON = ROOT / "assets" / "glacien.svg"
 RELEASE_FILE = ROOT / "release.json"
 OUTPUT_ROOT = ROOT / "release-output"
@@ -36,6 +35,11 @@ def read_release_version(path: Path = RELEASE_FILE) -> str:
     if not version or not re.fullmatch(r"[0-9A-Za-z.+:~\-]+", version):
         raise SystemExit(f"release.json 中的版本不适用于 Debian 软件包：{version!r}")
     return version
+
+
+def desktop_executable_path(version: str) -> Path:
+    """返回当前版本的 Linux 桌面可执行文件。"""
+    return ROOT / "dist" / f"Glacien-{version}"
 
 
 def read_dependencies(path: Path = DEPENDENCIES_FILE) -> list[str]:
@@ -104,9 +108,9 @@ def require_linux_tools() -> str:
     return dpkg_deb
 
 
-def copy_package_files(package_root: Path) -> int:
+def copy_package_files(package_root: Path, executable: Path) -> int:
     """复制应用、图标和菜单入口，并返回安装体积 KiB。"""
-    for required in (EXECUTABLE, ICON, DESKTOP_FILE):
+    for required in (executable, ICON, DESKTOP_FILE):
         if not required.is_file():
             raise SystemExit(f"缺少 DEB 打包文件：{required}")
 
@@ -115,7 +119,7 @@ def copy_package_files(package_root: Path) -> int:
     desktop_target = package_root / "usr" / "share" / "applications" / "glacien-workbench.desktop"
     for target in (app_target, icon_target, desktop_target):
         target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(EXECUTABLE, app_target)
+    shutil.copy2(executable, app_target)
     shutil.copy2(ICON, icon_target)
     shutil.copy2(DESKTOP_FILE, desktop_target)
     app_target.chmod(0o755)
@@ -129,6 +133,7 @@ def build_deb() -> Path:
     """创建 release-output 下的 DEB 安装包。"""
     dpkg_deb = require_linux_tools()
     version = read_release_version()
+    executable = desktop_executable_path(version)
     architecture = detect_architecture()
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     output = OUTPUT_ROOT / f"{PACKAGE_NAME}_{version}_{architecture}.deb"
@@ -137,7 +142,7 @@ def build_deb() -> Path:
         package_root = Path(temporary_directory) / PACKAGE_NAME
         control_directory = package_root / "DEBIAN"
         control_directory.mkdir(parents=True)
-        installed_size = copy_package_files(package_root)
+        installed_size = copy_package_files(package_root, executable)
         control = control_directory / "control"
         control.write_text(render_control(version, architecture, installed_size), encoding="utf-8")
         control.chmod(0o644)

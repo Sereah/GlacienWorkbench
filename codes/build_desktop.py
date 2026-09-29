@@ -8,6 +8,7 @@ import json
 import os
 import platform
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -21,6 +22,7 @@ DIST_ROOT = ROOT / "dist"
 GENERATED_ASSETS = BUILD_ROOT / "assets"
 APP_NAME = "Glacien"
 APP_ID = "com.glacien.workbench"
+VERSION_PATTERN = re.compile(r"[0-9A-Za-z][0-9A-Za-z._-]*")
 
 
 def run_stage(label: str, command: list[str], *, environment: dict[str, str] | None = None) -> None:
@@ -90,9 +92,37 @@ def data_argument(source: Path, destination: str) -> str:
 
 def release_version() -> str:
     try:
-        return str(json.loads((ROOT / "release.json").read_text(encoding="utf-8"))["version"])
+        version = str(json.loads((ROOT / "release.json").read_text(encoding="utf-8"))["version"]).strip()
     except (OSError, KeyError, ValueError, json.JSONDecodeError) as error:
         raise SystemExit(f"无法读取 release.json 版本：{error}") from error
+    if not VERSION_PATTERN.fullmatch(version):
+        raise SystemExit(f"release.json 中的版本不适用于产物文件名：{version!r}")
+    return version
+
+
+def build_output_path(system: str, version: str | None = None) -> Path:
+    """返回 PyInstaller 临时产物或带版本号的最终产物路径。"""
+    name = APP_NAME if version is None else f"{APP_NAME}-{version}"
+    if system == "Darwin":
+        return DIST_ROOT / f"{name}.app"
+    if system == "Windows":
+        return DIST_ROOT / f"{name}.exe"
+    return DIST_ROOT / name
+
+
+def remove_output(path: Path) -> None:
+    """只清理已确定的单个构建产物。"""
+    if path.is_dir():
+        shutil.rmtree(path)
+    elif path.exists():
+        path.unlink()
+
+
+def publish_versioned_output(source: Path, target: Path) -> Path:
+    """将稳定内部名称的构建结果发布为带版本号的顶层产物。"""
+    remove_output(target)
+    source.replace(target)
+    return target
 
 
 def build(clean: bool) -> Path:
@@ -102,13 +132,13 @@ def build(clean: bool) -> Path:
     system = platform.system()
     if system not in {"Darwin", "Windows", "Linux"}:
         raise SystemExit(f"不支持的构建平台：{system}")
+    version = release_version()
+    temporary_output = build_output_path(system)
+    versioned_output = build_output_path(system, version)
     if clean:
         shutil.rmtree(BUILD_ROOT / "work", ignore_errors=True)
-        output = DIST_ROOT / (f"{APP_NAME}.app" if system == "Darwin" else (f"{APP_NAME}.exe" if system == "Windows" else APP_NAME))
-        if output.is_dir():
-            shutil.rmtree(output)
-        elif output.exists():
-            output.unlink()
+        remove_output(temporary_output)
+        remove_output(versioned_output)
     command = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm",
@@ -132,29 +162,27 @@ def build(clean: bool) -> Path:
         command.append("--onefile")
     command.append(str(ROOT / "codes" / "desktop_launcher.py"))
     mode = "全量" if clean else "增量"
-    print(f"正在为 {system} {mode}构建 {APP_NAME} {release_version()}…", flush=True)
+    print(f"正在为 {system} {mode}构建 {APP_NAME} {version}…", flush=True)
     environment = os.environ.copy()
     environment.setdefault("PYINSTALLER_CONFIG_DIR", str(BUILD_ROOT / "pyinstaller-cache"))
     run_stage("PyInstaller 构建", command, environment=environment)
     if system == "Darwin":
-        output = DIST_ROOT / f"{APP_NAME}.app"
-        plist_path = output / "Contents" / "Info.plist"
+        plist_path = temporary_output / "Contents" / "Info.plist"
         with plist_path.open("rb") as stream:
             plist = plistlib.load(stream)
         plist["CFBundleIdentifier"] = APP_ID
-        plist["CFBundleShortVersionString"] = release_version()
-        plist["CFBundleVersion"] = release_version()
+        plist["CFBundleShortVersionString"] = version
+        plist["CFBundleVersion"] = version
         with plist_path.open("wb") as stream:
             plistlib.dump(plist, stream)
         run_stage(
             "macOS 临时签名",
-            ["codesign", "--force", "--deep", "--sign", "-", str(output)],
+            ["codesign", "--force", "--deep", "--sign", "-", str(temporary_output)],
         )
         auxiliary = DIST_ROOT / APP_NAME
         if auxiliary.is_dir():
             shutil.rmtree(auxiliary)
-    else:
-        output = DIST_ROOT / (f"{APP_NAME}.exe" if system == "Windows" else APP_NAME)
+    output = publish_versioned_output(temporary_output, versioned_output)
     print(f"桌面构建总耗时 {time.perf_counter() - started_at:.1f} 秒", flush=True)
     return output
 

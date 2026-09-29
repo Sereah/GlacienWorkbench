@@ -53,6 +53,12 @@ class LinuxDebPackageTest(unittest.TestCase):
 
             self.assertEqual(package_linux_deb.read_release_version(path), "1.2.3")
 
+    def test_uses_versioned_desktop_executable(self):
+        self.assertEqual(
+            package_linux_deb.desktop_executable_path("1.2.3").name,
+            "Glacien-1.2.3",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -28,7 +28,7 @@ Glacien Workbench 是本地开发工作站，后端仅监听 `127.0.0.1`。桌�
 - 内置主题与用户主题导入、导出和删除。
 - 外置 FFmpeg 驱动的多通道 PCM 读取与播放预览。
 
-工具不内置 Android SDK 或 FFmpeg。ADB 功能需要 `adb`，APK 签名和证书读取需要 `apksigner`，签名流程可选使用 `zipalign`；scrcpy 投屏需要系统安装 `scrcpy`，PCM 播放需要系统安装或配置 `ffmpeg`。
+工具不内置 Android SDK、scrcpy 或 FFmpeg。ADB 功能需要 `adb`，APK 签名和证书读取需要 `apksigner`，签名流程可选使用 `zipalign`；scrcpy 投屏和有声录屏需要系统安装 `scrcpy`，PCM 播放需要系统安装或配置 `ffmpeg`。
 
 ## 启动链路
 

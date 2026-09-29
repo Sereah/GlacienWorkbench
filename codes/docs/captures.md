@@ -11,21 +11,25 @@
 
 ## 录屏
 
-- 设备端文件固定为 `/data/local/tmp/glacien-screenrecord-<随机ID>.mp4`。
-- 同一服务进程最多允许一个录制会话。后端持有设备端 `screenrecord` PID；手动停止时发送 `SIGINT`，等待 MP4 正常收尾后再 Pull。
-- Pull 后必须校验 MP4 的 `mvhd` 媒体时长。文件非空但时长为 0（例如只写入首帧）必须报告为录制失败，不能误报完成；该本地异常文件和设备端原始文件会保留，供下载和排查。有效文件才删除设备临时文件，本地文件固定写入 `adb-tools/device-tools/recordings/`。
+- 页面提供三个单次录制模式：`Android 原生（无声音）`、`scrcpy 摄像收音` 和 `scrcpy 混合收音`。选择只影响本次录制，不写入配置；默认保持 Android 原生模式。
+- Android 原生模式使用设备端 `screenrecord`，文件固定为 `/data/local/tmp/glacien-screenrecord-<随机ID>.mp4`。后端持有设备端 PID；手动停止时发送 `SIGINT`，等待 MP4 正常收尾后再 Pull。该模式只录制视频。
+- scrcpy 摄像收音使用 `--audio-source=mic-camcorder`，通过设备麦克风采集接近手机拍视频的环境声音；scrcpy 混合收音使用 `--audio-source=voice-performance`，尝试同时采集设备麦克风与设备播放声音。实际音频路由受 Android 版本、车机 ROM 和 Audio HAL 限制。
+- 两种 scrcpy 模式都使用外部 scrcpy，并固定附加 `--no-window --no-playback --no-control --audio-codec=aac --require-audio`。音频不可用时必须启动失败，不能静默降级为无声视频；输出直接写入受管录屏目录，不经过设备端临时文件和 ADB Pull。
+- scrcpy 音频要求 Android 11 或更高版本；Android 11 启动时设备屏幕需要保持解锁，Android 10 及以下只能使用原生无声录制。厂商系统不支持所选音源时由 `--require-audio` 返回明确错误。
+- 同一服务进程最多允许一个录制会话。手动停止 scrcpy 时优先发送中断信号以完成 MP4 封装，超时才终止进程。
+- 所有模式完成后都必须校验 MP4 的 `mvhd` 媒体时长。scrcpy 模式还必须从 `moov/trak/mdia/hdlr` 确认存在 `soun` 音轨，不能只依赖启动参数。文件非空但时长为 0、未完成封装或有声模式缺少音轨时必须报告为录制失败，不能误报完成；本地异常文件会保留供排查，Android 原生模式的有效文件才删除设备临时文件。录屏固定写入 `adb-tools/device-tools/recordings/`。
 - 录屏不使用 WebEngine 内置 `<video>` 预览。录制完成、点击主页面“播放”或媒体库录屏卡片时，通过受控后端接口交给当前系统的默认播放器。
-- `--bugreport` 可附加诊断信息和额外数据轨；默认码率使用 8 Mbps。
+- `--bugreport` 仅用于 Android 原生模式，可附加诊断信息和额外数据轨；默认码率使用 8 Mbps。scrcpy 模式把分辨率选项转换为保持宽高比的 `--max-size`。
 - 用户可以在开始录制前填写文件名称；留空时沿用设备序列号和时间戳自动命名。自定义名称由后端校验，自动补 `.mp4`，重名时追加序号且不覆盖已有文件。
 - 录屏启动成功后立即通过 `adb exec-out screencap -p` 保存一张近似首帧封面，不依赖 FFmpeg 或 WebEngine 视频解码。封面与最终 MP4 同名关联，只用于最近录屏和媒体库展示；截图失败不影响录制，无封面时回退到播放图标。
-- 页面刷新后通过 `/api/captures/record/status` 恢复状态；达到时间上限后，状态查询负责 Pull 完成文件。
+- 页面刷新后通过 `/api/captures/record/status` 恢复状态和实际录制模式；达到时间上限后，状态查询负责完成 Pull 或确认 scrcpy 本地文件。
 - 时间上限必须在 1-180 秒，码率和分辨率需校验，不接受任意 Shell 参数。
 
 ## Display 与 scrcpy
 
 - 页面通过 `dumpsys display` 展示逻辑 Display ID、名称和分辨率；截图与 `screenrecord` 使用 `uniqueId=local:<id>` 对应的 SurfaceFlinger 物理 ID，scrcpy 使用逻辑 Display ID，不能混用。无法获得物理 ID 的屏幕不得静默回退主屏。
-- scrcpy 使用系统安装的外部可执行文件。默认检查 PATH 和三端常见路径；自定义路径持久化在 `adb-tools/device-tools/config.json`，后端必须重新验证其解析后为 `scrcpy` / `scrcpy.exe` 可执行文件，并始终用参数数组启动。启动时通过 `ADB` 环境变量传入 Workbench 已解析的 adb，捕获短暂启动阶段日志；进程提前退出时向页面返回最后一条可读错误。
-- scrcpy 启动后作为独立桌面进程运行，HTTP 请求不等待投屏窗口退出。
+- scrcpy 投屏和有声录屏使用系统安装的外部可执行文件。默认检查 PATH 和三端常见路径；自定义路径持久化在 `adb-tools/device-tools/config.json`，后端必须重新验证其解析后为 `scrcpy` / `scrcpy.exe` 可执行文件，并始终用参数数组启动。启动时通过 `ADB` 环境变量传入 Workbench 已解析的 adb，捕获启动与录制日志；进程提前退出时向页面返回最后一条可读错误。
+- scrcpy 投屏启动后作为独立桌面进程运行，HTTP 请求不等待投屏窗口退出；scrcpy 录屏进程则由录制会话持有，以支持状态恢复、手动停止和文件收尾。
 
 ## 截图对比
 

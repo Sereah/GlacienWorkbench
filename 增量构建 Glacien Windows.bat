@@ -1,6 +1,6 @@
 @echo off
 setlocal
-REM 在 Windows 本机复用缓存构建 dist\Glacien.exe。
+REM 在 Windows 本机复用缓存构建 dist\Glacien-VERSION.exe。
 cd /d "%~dp0"
 set "BUILD_VENV=%CD%\.desktop-build-venv"
 
@@ -12,7 +12,7 @@ if errorlevel 1 goto :error
 if errorlevel 1 goto :error
 "%BUILD_VENV%\Scripts\python.exe" codes\build_desktop.py
 if errorlevel 1 goto :error
-echo Incremental build completed: %CD%\dist\Glacien.exe
+echo Incremental build completed. Versioned artifact: %CD%\dist
 exit /b 0
 
 :error
