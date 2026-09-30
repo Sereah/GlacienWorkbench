@@ -10,6 +10,45 @@ function updateLogRunState(){
   if (exportButton) exportButton.disabled = !name;
   return name;
 }
+const LOG_RENDER_BATCH_SIZE=250;
+const LOG_RENDER_QUEUE_LIMIT=MAX_VISIBLE_LOG_LINES+LOG_RENDER_BATCH_SIZE;
+function clearPendingRealtimeLogRender(){
+  const render=state.logRender;
+  if(render?.frameId)cancelAnimationFrame(render.frameId);
+  if(render){render.lines=[];render.frameId=0;}
+}
+function discardRealtimeLogRender(){
+  clearPendingRealtimeLogRender();
+  state.logRender=null;
+}
+function beginRealtimeLogRender(sessionId,preset,processText){
+  discardRealtimeLogRender();
+  state.logRender={sessionId,preset,processText,lines:[],frameId:0,highlights:[]};
+}
+function scheduleRealtimeLogRender(){
+  const render=state.logRender;
+  if(!render||render.frameId)return;
+  render.frameId=requestAnimationFrame(()=>flushRealtimeLogRender());
+}
+function enqueueRealtimeLog(line,sessionId){
+  const render=state.logRender;
+  if(!render||render.sessionId!==sessionId)return;
+  render.lines.push(line);
+  // 页面只展示最近日志；积压过多时保留最新内容，避免隐藏页面持续占用内存。
+  if(render.lines.length>LOG_RENDER_QUEUE_LIMIT)render.lines.splice(0,render.lines.length-MAX_VISIBLE_LOG_LINES);
+  scheduleRealtimeLogRender();
+}
+function flushRealtimeLogRender({drain=false,updateStatus=true}={}){
+  const render=state.logRender;
+  if(!render)return;
+  if(render.frameId){cancelAnimationFrame(render.frameId);render.frameId=0;}
+  const count=drain?render.lines.length:Math.min(LOG_RENDER_BATCH_SIZE,render.lines.length);
+  appendLogBatch(render.lines.splice(0,count),render.highlights);
+  if(updateStatus&&render.sessionId===state.logSessionId&&state.logs){
+    $('#logStatus').textContent='过滤方案“'+render.preset+'”'+render.processText+'已接收 '+state.logCount+' 条匹配日志。';
+  }
+  if(render.lines.length)scheduleRealtimeLogRender();
+}
 loadLogFilters = async function(){
   try {
     const filters = await api("/api/log-filters"), select = $("#logPreset"), previous = select.value;
@@ -80,21 +119,24 @@ startLogs = async function(){
   state.logCount = 0;
   $("#logOutput").innerHTML = '<span class="log-hint">正在连接过滤方案匹配的 adb logcat…</span>';
   $("#logStatus").textContent = "正在建立实时 Logcat 连接…";
+  const processText = target.name ? " · 进程 " + target.name + "（PID " + target.pids.join("、") + "）" : "";
+  beginRealtimeLogRender(sessionId,preset,processText);
   const source = new EventSource("/api/logs?" + query);
-  if(sessionId!==state.logSessionId){source.close();return;}
+  if(sessionId!==state.logSessionId){source.close();discardRealtimeLogRender();return;}
   state.logs = source;
   $("#logToggle").textContent = "停止监听";
   $("#logToggle").disabled = false;
   source.onopen = function(){if(sessionId!==state.logSessionId||state.logs!==source)return;$("#logStatus").textContent = "SSE 已连接，正在等待匹配的 Logcat 日志…"; };
-  const processText = target.name ? " · 进程 " + target.name + "（PID " + target.pids.join("、") + "）" : "";
-  source.addEventListener("ready", function(event){if(sessionId!==state.logSessionId||state.logs!==source)return;const detail=JSON.parse(event.data);state.logRule=detail.rule||{};const current=detail.process?.name?" · 进程 "+detail.process.name+"（PID "+detail.process.pids.join("、")+"）":processText;$("#logStatus").textContent="已连接过滤方案“"+preset+"”"+current+"，等待匹配日志。"; });
-  source.onmessage = function(event){if(sessionId!==state.logSessionId||state.logs!==source)return;try { appendLog(JSON.parse(event.data)); state.logCount += 1; $("#logStatus").textContent = "过滤方案“" + preset + "”" + processText + "已接收 " + state.logCount + " 条匹配日志。"; } catch(error) { toast("日志渲染失败：" + error.message, true); } };
+  source.addEventListener("ready", function(event){if(sessionId!==state.logSessionId||state.logs!==source)return;const detail=JSON.parse(event.data);state.logRule=detail.rule||{};if(state.logRender?.sessionId===sessionId)state.logRender.highlights=preparedLogHighlights();const current=detail.process?.name?" · 进程 "+detail.process.name+"（PID "+detail.process.pids.join("、")+"）":processText;$("#logStatus").textContent="已连接过滤方案“"+preset+"”"+current+"，等待匹配日志。"; });
+  source.onmessage = function(event){if(sessionId!==state.logSessionId||state.logs!==source)return;try { enqueueRealtimeLog(JSON.parse(event.data),sessionId); state.logCount += 1; } catch(error) { toast("日志渲染失败：" + error.message, true); } };
   source.onerror = function(){if(sessionId!==state.logSessionId||state.logs!==source)return;toast("Logcat 连接已断开", true);$("#logStatus").textContent = "连接中断。请确认设备在线后重新开始。";stopLogs();};
 };
 stopLogs = function(silent=false){
+  if(silent)discardRealtimeLogRender();else flushRealtimeLogRender({drain:true,updateStatus:false});
   state.logSessionId=(state.logSessionId||0)+1;
   if (state.logs) state.logs.close();
   state.logs = null;
+  discardRealtimeLogRender();
   $("#logToggle").textContent = "开始监听";
   if (!silent&&$("#logStatus")) $("#logStatus").textContent = "已停止接收 Logcat。";
   updateLogRunState();

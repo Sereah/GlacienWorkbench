@@ -178,6 +178,7 @@ function startLogs() {
 }
 function stopLogs(){if(state.logs)state.logs.close();state.logs=null;$('#logToggle').textContent='开始';if($('#logStatus'))$('#logStatus').textContent='已停止接收 Logcat。';}
 function clearLogs(){
+  clearPendingRealtimeLogRender();
   state.logCount=0;
   $('#logOutput').innerHTML='';
   $('#logStatus').textContent=state.logs?'页面显示已清空，实时监听仍在继续。':'页面显示已清空。';
@@ -198,4 +199,31 @@ async function clearDeviceLogs(){
 async function exportLogs(filtered){try{const r=await api('/api/logs/export',{method:'POST',body:JSON.stringify(withAdbSerial({preset:$('#logPreset').value,filtered}))});toast(`已保存 ${r.lines} 行：${r.path}`);}catch(e){toast(e.message,true)}}
 function logHighlights(){const configured=(state.logRule.highlights||[]).flatMap(item=>(item.terms||[]).filter(Boolean).map(term=>({term,color:item.color||'yellow'})));if(configured.length)return configured;return(state.logRule.highlight||[]).filter(Boolean).map(term=>({term,color:'yellow'}));}
 function logSeverityClass(line){const text=String(line||'');if(/\[(?:error|err|fatal)\]|\sE\s|\b(?:fatal|exception|crash)\b/i.test(text))return 'error';if(/\[(?:warn|warning)\]|\sW\s|\bwarn(?:ing)?\b/i.test(text))return 'warn';return ''}
-function appendLog(line){const out=$('#logOutput'),el=document.createElement('span');el.className=`log-line ${logSeverityClass(line)}`;const highlights=logHighlights(),lower=line.toLowerCase();let position=0;while(position<line.length){let hit=-1,chosen=null;for(const item of highlights){const index=lower.indexOf(item.term.toLowerCase(),position);if(index!==-1&&(hit===-1||index<hit||(index===hit&&item.term.length>chosen.term.length))){hit=index;chosen=item;}}if(hit===-1){el.append(document.createTextNode(line.slice(position)));break;}if(hit>position)el.append(document.createTextNode(line.slice(position,hit)));const mark=document.createElement('mark');mark.className=`highlight-${chosen.color}`;mark.textContent=line.slice(hit,hit+chosen.term.length);el.append(mark);position=hit+chosen.term.length;}out.appendChild(el);while(out.childNodes.length>1300)out.removeChild(out.firstChild);if(autoScrollEnabled())out.scrollTop=out.scrollHeight;}
+const MAX_VISIBLE_LOG_LINES=1300;
+function preparedLogHighlights(){return logHighlights().map(item=>({...item,term:String(item.term),lowerTerm:String(item.term).toLowerCase()}));}
+function createLogLine(line,highlights){
+  const text=String(line||''),lower=text.toLowerCase(),element=document.createElement('span');
+  element.className=`log-line ${logSeverityClass(text)}`;
+  let position=0;
+  while(position<text.length){
+    let hit=-1,chosen=null;
+    for(const item of highlights){
+      const index=lower.indexOf(item.lowerTerm,position);
+      if(index!==-1&&(hit===-1||index<hit||(index===hit&&item.term.length>chosen.term.length))){hit=index;chosen=item;}
+    }
+    if(hit===-1){element.append(document.createTextNode(text.slice(position)));break;}
+    if(hit>position)element.append(document.createTextNode(text.slice(position,hit)));
+    const mark=document.createElement('mark');mark.className=`highlight-${chosen.color}`;mark.textContent=text.slice(hit,hit+chosen.term.length);element.append(mark);position=hit+chosen.term.length;
+  }
+  return element;
+}
+function appendLogBatch(lines,highlights=preparedLogHighlights()){
+  if(!lines.length)return;
+  const output=$('#logOutput'),fragment=document.createDocumentFragment();
+  output.querySelector('.log-hint')?.remove();
+  for(const line of lines.slice(-MAX_VISIBLE_LOG_LINES))fragment.append(createLogLine(line,highlights));
+  output.append(fragment);
+  while(output.childElementCount>MAX_VISIBLE_LOG_LINES)output.firstElementChild.remove();
+  if(autoScrollEnabled())output.scrollTop=output.scrollHeight;
+}
+function appendLog(line){appendLogBatch([line]);}
