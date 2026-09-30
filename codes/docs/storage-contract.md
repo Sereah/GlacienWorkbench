@@ -29,6 +29,7 @@
 | `themes` | 用户导入主题 |
 | `device_files` | 设备文件与应用 APK Pull 共用的根级 `downloads/` 中转缓存 |
 | `bugreports` | 完整系统 Bugreport 诊断包与任务临时目录 |
+| `performance_diagnostics` | 快速性能采样配置、会话原始数据与 CSV/JSON 导出 |
 | `runtime` | WebEngine Profile 与迁移备份 |
 
 ## 修改功能时的判断

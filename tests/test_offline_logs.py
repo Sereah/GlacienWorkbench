@@ -71,6 +71,35 @@ class OfflineLogArchiveTest(unittest.TestCase):
         self.assertEqual("single.log", result["results"][0]["file"])
         self.assertEqual(str(log_file.resolve()), run.call_args.args[0][-1])
 
+    def test_directory_query_sorts_by_natural_filename_then_line_number(self):
+        def match_event(name, line, text):
+            return json.dumps({
+                "type": "match",
+                "data": {
+                    "path": {"text": str(self.source / name)},
+                    "lines": {"text": text + "\n"},
+                    "line_number": line,
+                },
+            })
+
+        output = "\n".join([
+            match_event("android_log.10", 20, "third needle"),
+            match_event("android_log.2", 9, "second needle"),
+            match_event("android_log.2", 3, "first needle"),
+        ])
+        completed = subprocess.CompletedProcess([], 0, output, "")
+        with patch.object(logs, "rg_executable", return_value="/usr/bin/rg"), \
+                patch.object(logs.proc, "run", return_value=completed):
+            result = logs.query(
+                self.settings(),
+                {"source": "test", "filters": [{"mode": "include_any", "terms": ["needle"]}]},
+            )
+
+        self.assertEqual(
+            [("android_log.2", 3), ("android_log.2", 9), ("android_log.10", 20)],
+            [(item["file"], item["line"]) for item in result["results"]],
+        )
+
     def test_extracts_gzip_into_archive_directory_and_skips_conflict(self):
         archive = self.source / "system.log.gz"
         with gzip.open(archive, "wb") as output:

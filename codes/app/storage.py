@@ -31,6 +31,7 @@ STORAGE_DOMAINS = {
     "captures": {"config": "adb-tools/device-tools/config.json", "default": {"storage_key": "captures", "schema_version": 1, "scrcpy_path": ""}, "directories": ("screenshots", "recordings", "recording-covers")},
     "device_files": {"config": None, "root": ".", "directories": ("downloads",)},
     "bugreports": {"config": None, "root": "adb-tools/bugreports", "directories": ("files", "runtime")},
+    "performance_diagnostics": {"config": "adb-tools/performance-diagnostics/config.json", "default": {"storage_key": "performance_diagnostics", "schema_version": 1, "sample_interval_seconds": 1}, "directories": ("sessions", "runtime")},
     "offline_logs": {"config": "local-tools/offline-logs/config.json", "default": {"storage_key": "offline_logs", "schema_version": 2, "offline_filter_presets": {}, "offline_log_sources": {}}, "directories": ()},
     "audio_processing": {"config": "local-tools/audio-processing/config.json", "default": {"storage_key": "audio_processing", "schema_version": 1, "ffmpeg_path": "", "sample_format": "s16le", "sample_rate": 48000, "channels": 2}, "directories": ("inputs", "previews")},
     "themes": {"config": "runtime/themes.json", "default": {"storage_key": "themes", "schema_version": 1, "selected_theme": "", "themes": {}}, "directories": ()},
@@ -159,6 +160,26 @@ def update(feature: str, values: dict) -> dict:
         merged = {**current, **{key: value for key, value in values.items() if key not in protected}}
         write(feature, merged)
         return merged
+
+
+def write_artifact_json(feature: str, item: Path, value: dict) -> None:
+    """原子写入功能域内的 JSON 产物，并附加稳定域元数据。"""
+    if not isinstance(value, dict):
+        raise ValueError("JSON 产物必须是对象")
+    definition = STORAGE_DOMAINS.get(feature)
+    if not definition:
+        raise ValueError(f"未知数据域：{feature}")
+    base = (ROOT / definition.get("root", Path(definition.get("config", "")).parent)).resolve()
+    destination = item.resolve()
+    if destination != base and base not in destination.parents:
+        raise ValueError("JSON 产物路径不属于指定数据域")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    version = definition.get("default", {}).get("schema_version", 1)
+    document = {"storage_key": feature, "schema_version": version, **value}
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    with _LOCK:
+        temporary.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(destination)
 
 
 def data_dir(feature: str, name: str) -> Path:

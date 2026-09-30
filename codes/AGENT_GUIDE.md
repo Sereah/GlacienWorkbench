@@ -11,6 +11,7 @@
 - `docs/captures.md`：截图、录屏、scrcpy 和媒体文件。
 - `docs/device-files.md`：设备文件浏览、Pull、上传与删除。
 - `docs/apps-and-bugreports.md`：全量应用管理、Android 11 无线配对与 Bugreport 长任务。
+- `docs/performance-diagnostics.md`：快速性能采样、指标口径、会话归档与导出。
 - `docs/audio-processing.md`：外置 FFmpeg、PCM 参数和多通道播放预览。
 - `docs/desktop.md`：Qt WebEngine 桌面宿主和三端构建。
 
@@ -24,6 +25,7 @@ Glacien Workbench 是本地开发工作站，后端仅监听 `127.0.0.1`。桌�
 - APK 安装、签名、校验、收集与推送，以及资源部署。
 - 全量应用管理、关注应用、自定义命令和广播发送。
 - 实时 Logcat、离线日志分析、设备日志 Pull 和完整 Bugreport 采集。
+- 非 debuggable 应用可用的整机与指定进程快速性能看板。
 - 截图、连续截图、录屏、截图对比和 scrcpy 投屏。
 - 设备文件浏览、新建、文本预览、上传、下载和删除。
 - 内置主题与用户主题导入、导出和删除。
@@ -63,6 +65,7 @@ ADB 工具
   ADB 概览
   部署中心：安装 APK / 签名 APK / 资源部署
   应用与进程：应用管理 / 关注应用
+  性能诊断
   ADB 命令：自定义命令 / 发送广播
   设备工具：屏幕捕获 / 设备文件 / 日志Pull / Bugreport采集
   实时日志
@@ -86,6 +89,7 @@ ADB 工具
 | `app/device.py` | 兼容进程接口、特殊拉起、广播、自定义命令和实时日志 |
 | `app/app_manager.py` | 全量应用列表、按需详情和应用管理操作 |
 | `app/bugreports.py` | Bugreport 长任务、状态和受控 ZIP 文件 |
+| `app/performance.py` | Android 性能指标采样、任务状态和 CSV/JSON 会话归档 |
 | `app/logs.py` | 原生 rg 离线日志扫描 |
 | `app/audio.py` | 外置 FFmpeg 探测、PCM 文件和 WAV 播放预览 |
 | `app/device_logs.py` | 设备日志源扫描、时间筛选和白名单 Pull |
@@ -99,7 +103,7 @@ ADB 工具
 | `web/features/deployment-and-device.js` | APK、签名、广播和基础实时日志逻辑 |
 | `web/features/workbench.js` | 离线日志、设备工具、配置弹窗、规则分享和命令编辑增强 |
 | `web/features/realtime-logs.js` | 实时日志会话、运行态和草稿保护增强 |
-| `web/features/audio.js`、`app-manager.js`、`wireless-pairing.js`、`bugreports.js` | 独立业务功能 |
+| `web/features/audio.js`、`app-manager.js`、`wireless-pairing.js`、`bugreports.js`、`performance.js` | 独立业务功能 |
 | `web/app.js` | 前端启动编排，不承载具体功能实现 |
 | `web/styles.css` | 布局与主题语义样式 |
 | `web/themes.json` | 内置主题、颜色令牌和中文用途说明 |
@@ -240,6 +244,7 @@ ADB 工具
 | `/api/captures/*` | 屏幕捕获状态和媒体文件 |
 | `/api/device-files/*` | 设备目录和已下载文件 |
 | `/api/bugreports/status`、`/api/bugreports/files` | Bugreport 任务和历史文件 |
+| `/api/performance/status`、`/api/performance/sessions`、`/api/performance/download` | 性能采样状态、受管历史记录和会话导出 |
 | `/api/logs` | 实时 Logcat SSE |
 
 主要 POST 接口：
@@ -267,6 +272,7 @@ ADB 工具
 | `/api/captures/*` | 截图、录屏、scrcpy 和媒体管理 |
 | `/api/device-files/*` | 设备文件新建、有限预览、单项/批量 Pull、上传和删除 |
 | `/api/bugreports/*` | Bugreport 启动、取消、下载和删除 |
+| `/api/performance/*` | 性能采样启动、暂停、恢复、停止归档和历史记录删除 |
 | `/api/themes/import`、`/api/themes/delete` | 用户主题管理 |
 
 ## 前端维护约束

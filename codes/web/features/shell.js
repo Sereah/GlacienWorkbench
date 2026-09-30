@@ -1,4 +1,4 @@
-function pageMeta(id) { return ({ home:['WORKBENCH','首页'], 'adb-overview':['ADB WORKSPACE','ADB 概览'], apks:['DEPLOYMENT CENTER','部署中心'], processes:['APPLICATIONS & PROCESSES','应用与进程'], logs:['LOGCAT STREAM','实时日志'], 'offline-logs':['LOCAL FILE FILTER','离线日志分析'], 'audio-processing':['PCM AUDIO PLAYER','音频处理'], 'device-tools':['DEVICE UTILITIES','设备工具'], commands:['ADB COMMANDS','ADB 命令'], settings:['LOCAL CONFIGURATION','设置'] })[id]; }
+function pageMeta(id) { return ({ home:['WORKBENCH','首页'], 'adb-overview':['ADB WORKSPACE','ADB 概览'], apks:['DEPLOYMENT CENTER','部署中心'], processes:['APPLICATIONS & PROCESSES','应用与进程'], performance:['PERFORMANCE DIAGNOSTICS','性能诊断'], logs:['LOGCAT STREAM','实时日志'], 'offline-logs':['LOCAL FILE FILTER','离线日志分析'], 'audio-processing':['PCM AUDIO PLAYER','音频处理'], 'device-tools':['DEVICE UTILITIES','设备工具'], commands:['ADB COMMANDS','ADB 命令'], settings:['LOCAL CONFIGURATION','设置'] })[id]; }
 const navGroupStorageKey='glacien.nav.groups';
 const themeStorageKey='glacien.theme';
 const themeColorPattern=/^(#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?[(][^;{}]+[)]|hsla?[(][^;{}]+[)])$/i;
@@ -204,6 +204,7 @@ function navigate(id) {
   if(id==='commands')selectAdbOperationTab(state.adbOperationTab||'commands');
   if(id==='settings')renderSettings();
   if(id==='audio-processing')loadAudioPage();
+  if(id==='performance')loadPerformancePage();
 }
 
 async function refreshStatus() {
@@ -247,6 +248,8 @@ function renderAdbDeviceSelector(deviceStatus) {
 async function selectAdbDevice(serial) {
   if (!serial || serial === state.adbSerial) return;
   if (state.logs) stopLogs();
+  state.performance.applicationsLoaded = false;
+  $('#performanceApplications')?.replaceChildren();
   state.adbSerial = serial; localStorage.setItem('glacien.adb.serial', serial);
   try { await refreshAll(); toast('已切换设备：' + serial); } catch (error) { toast(error.message, true); }
 }

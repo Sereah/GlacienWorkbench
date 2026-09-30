@@ -20,7 +20,7 @@ MIGRATION_MARKER = ROOT / ".storage-v2"
 
 DEFAULT_APP = storage.default("app")
 DEFAULTS = {
-    feature: storage.default(feature) for feature in ("adb", "apk_center", "resources", "signing", "processes", "broadcasts", "live_logs", "offline_logs", "audio_processing", "device_logs", "commands", "captures", "themes")
+    feature: storage.default(feature) for feature in ("adb", "apk_center", "resources", "signing", "processes", "broadcasts", "live_logs", "offline_logs", "audio_processing", "device_logs", "commands", "captures", "performance_diagnostics", "themes")
 }
 DOMAIN_FIELDS = {
     "app": {"port"},
@@ -36,6 +36,7 @@ DOMAIN_FIELDS = {
     "device_logs": {"device_log_sources"},
     "commands": {"adb_commands", "adb_command_categories"},
     "captures": {"scrcpy_path"},
+    "performance_diagnostics": {"sample_interval_seconds"},
     "themes": {"selected_theme"},
 }
 
@@ -87,6 +88,7 @@ def _legacy_values(value: dict) -> dict:
         "device_logs": {**DEFAULTS["device_logs"], "device_log_sources": value.get("device_log_sources", {})},
         "commands": {**DEFAULTS["commands"], "categories": value.get("adb_command_categories", []), "commands": value.get("adb_commands", {})},
         "captures": {**DEFAULTS["captures"], "scrcpy_path": value.get("scrcpy_path", "")},
+        "performance_diagnostics": DEFAULTS["performance_diagnostics"],
     }
 
 
@@ -171,6 +173,7 @@ def load() -> dict:
     device_logs = storage.read("device_logs", DEFAULTS["device_logs"].copy())
     commands = storage.read("commands", DEFAULTS["commands"].copy())
     captures = storage.read("captures", DEFAULTS["captures"].copy())
+    performance_diagnostics = storage.read("performance_diagnostics", DEFAULTS["performance_diagnostics"].copy())
     themes = storage.read("themes", DEFAULTS["themes"].copy())
     return {
         "port": int(app.get("port", 8910)), "sdk_root": str(adb.get("sdk_root", "")),
@@ -187,6 +190,7 @@ def load() -> dict:
         "device_log_sources": device_logs.get("device_log_sources", {}),
         "adb_commands": commands.get("commands", {}), "adb_command_categories": commands.get("categories", []),
         "scrcpy_path": str(captures.get("scrcpy_path", "")),
+        "sample_interval_seconds": int(performance_diagnostics.get("sample_interval_seconds", 1)),
         "selected_theme": str(themes.get("selected_theme", "")),
     }
 
@@ -225,6 +229,14 @@ def update_domain(feature: str, values: object) -> dict:
         if selected_theme and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", selected_theme):
             raise ValueError("主题 ID 格式无效")
         updates = {"selected_theme": selected_theme}
+    elif feature == "performance_diagnostics":
+        try:
+            interval = int(values.get("sample_interval_seconds", 1))
+        except (TypeError, ValueError) as error:
+            raise ValueError("采样间隔无效") from error
+        if interval not in {1, 2, 5, 10}:
+            raise ValueError("采样间隔必须是 1、2、5 或 10 秒")
+        updates = {"sample_interval_seconds": interval}
     if feature == "resources" and "resource_device_paths" in updates:
         updates["resource_device_paths"] = _resource_paths(updates["resource_device_paths"])
     storage.update(feature, updates)

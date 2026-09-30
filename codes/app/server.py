@@ -8,7 +8,7 @@ from urllib.request import urlopen
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs,quote,urlparse
-from . import android,app_manager,artifacts,audio,bugreports,captures,config,device,device_files,device_logs,logs,runtime,themes
+from . import android,app_manager,artifacts,audio,bugreports,captures,config,device,device_files,device_logs,logs,performance,runtime,themes
 
 # 前端是只读程序资源；settings、日志和产物由 config.ROOT 指向可写数据目录。
 STATIC=runtime.resource_path("web").resolve()
@@ -150,6 +150,12 @@ class Handler(BaseHTTPRequestHandler):
             if route=="/api/bugreports/download":
                 path=bugreports.resolve_file(q.get("id",[""])[0])
                 return self.file_reply(path,path.name)
+            if route=="/api/performance/status": return self.reply(performance.status())
+            if route=="/api/performance/sessions": return self.reply(performance.sessions())
+            if route=="/api/performance/download":
+                session_id,format_name=q.get("id",[""])[0],q.get("format",[""])[0]
+                path=performance.resolve_download(session_id,format_name)
+                return self.file_reply(path,performance.download_name(session_id,format_name))
             if route=="/api/logs":
                 process_name=q.get("process",[""])[0] if q.get("process_override",[""])[0]=="1" else None
                 rule=device.log_session_filter(settings,q.get("preset",[""])[0],process_name)
@@ -173,7 +179,7 @@ class Handler(BaseHTTPRequestHandler):
             settings,body=config.load(),self.body(); route=self.path
             # 先拒绝空/未知日志规则，避免未连接设备时掩盖“全部日志”绕过问题。
             if route=="/api/logs/export": device.saved_log_filter(settings, body.get("preset", ""))
-            selected=android.selected_device_settings(settings,body.get("serial","")) if route in {"/api/install","/api/apks/push","/api/resources/push","/api/processes/stop","/api/processes/launch","/api/processes/uninstall","/api/processes/cert-sha256","/api/apps/launch","/api/apps/stop","/api/apps/clear","/api/apps/enabled","/api/apps/uninstall","/api/apps/pull-apk","/api/bugreports/start","/api/broadcasts/send","/api/adb-commands/run","/api/logs/export","/api/logs/clear","/api/device-logs/scan","/api/device-logs/pull","/api/captures/screenshot","/api/captures/record/start","/api/captures/scrcpy/launch","/api/device-files/pull","/api/device-files/pull-batch","/api/device-files/delete","/api/device-files/delete-batch","/api/device-files/create-directory","/api/device-files/create-file","/api/device-files/preview","/api/adb/root","/api/adb/remount","/api/adb/reboot"} else settings
+            selected=android.selected_device_settings(settings,body.get("serial","")) if route in {"/api/install","/api/apks/push","/api/resources/push","/api/processes/stop","/api/processes/launch","/api/processes/uninstall","/api/processes/cert-sha256","/api/apps/launch","/api/apps/stop","/api/apps/clear","/api/apps/enabled","/api/apps/uninstall","/api/apps/pull-apk","/api/bugreports/start","/api/performance/start","/api/broadcasts/send","/api/adb-commands/run","/api/logs/export","/api/logs/clear","/api/device-logs/scan","/api/device-logs/pull","/api/captures/screenshot","/api/captures/record/start","/api/captures/scrcpy/launch","/api/device-files/pull","/api/device-files/pull-batch","/api/device-files/delete","/api/device-files/delete-batch","/api/device-files/create-directory","/api/device-files/create-file","/api/device-files/preview","/api/adb/root","/api/adb/remount","/api/adb/reboot"} else settings
             actions={"/api/install":lambda:artifacts.install(selected,body),"/api/apks/md5":lambda:artifacts.checksum(settings,body),"/api/apks/delete":lambda:artifacts.delete(settings,body),"/api/apks/rename":lambda:artifacts.rename_apk(settings,body),"/api/apks/sign":lambda:artifacts.sign(settings,body),"/api/resources/md5":lambda:artifacts.resource_checksum(settings,body),"/api/resources/delete":lambda:artifacts.delete_resource(settings,body),"/api/resources/rename":lambda:artifacts.rename_resource(settings,body),"/api/resources/push":lambda:artifacts.push(selected,body),"/api/processes/stop":lambda:device.stop(selected,body.get("package","")),"/api/processes/launch":lambda:device.launch(selected,body.get("package",""))}
             actions["/api/apks/collect"] = lambda: artifacts.collect_apks(settings, body)
             actions["/api/apks/sha256"] = lambda: artifacts.sha256_checksum(settings, body)
@@ -203,6 +209,11 @@ class Handler(BaseHTTPRequestHandler):
             actions["/api/bugreports/start"] = lambda: bugreports.start(selected, body)
             actions["/api/bugreports/cancel"] = bugreports.cancel
             actions["/api/bugreports/delete"] = lambda: bugreports.delete(body.get("id", ""))
+            actions["/api/performance/start"] = lambda: performance.start(selected, body)
+            actions["/api/performance/pause"] = performance.pause
+            actions["/api/performance/resume"] = performance.resume
+            actions["/api/performance/stop"] = performance.stop
+            actions["/api/performance/sessions/delete"] = lambda: performance.delete_sessions(body.get("ids"), body.get("confirmed"))
             actions["/api/offline-logs/query"] = lambda: logs.query(settings, body)
             actions["/api/offline-logs/extract"] = lambda: logs.extract_archives(settings, body)
             actions["/api/audio/ffmpeg/path"] = lambda: audio.save_ffmpeg_path(body.get("path", ""))

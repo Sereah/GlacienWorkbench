@@ -151,6 +151,23 @@ class StorageCompatibilityTest(unittest.TestCase):
         self.assertEqual(("s24le", 48000, 8), (stored["sample_format"], stored["sample_rate"], stored["channels"]))
         self.assertEqual(8, result["config"]["audio_channels"])
 
+    def test_performance_interval_is_saved_in_own_domain(self):
+        result = config.update_domain("performance_diagnostics", {"sample_interval_seconds": 5})
+
+        stored = storage.read("performance_diagnostics", storage.default("performance_diagnostics"))
+        self.assertEqual("performance_diagnostics", stored["storage_key"])
+        self.assertEqual(1, stored["schema_version"])
+        self.assertEqual(5, stored["sample_interval_seconds"])
+        self.assertEqual(5, result["config"]["sample_interval_seconds"])
+
+        with self.assertRaisesRegex(ValueError, "1、2、5 或 10"):
+            config.update_domain("performance_diagnostics", {"sample_interval_seconds": 3})
+
+    def test_frontend_registers_every_aggregate_config_field(self):
+        api_source = (Path(__file__).parents[1] / "codes/web/core/api.js").read_text(encoding="utf-8")
+
+        self.assertIn("performance_diagnostics: ['sample_interval_seconds']", api_source)
+
     def test_selected_theme_is_saved_in_user_data(self):
         storage.update("themes", {"themes": {"custom": {"name": "Custom"}}})
 

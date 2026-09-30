@@ -9,6 +9,7 @@ const state = {
   deviceFiles: {tab: 'captures', path: '/sdcard', parent: '', entries: [], loading: false, previewRequest: 0},
   appManager: {items: [], details: {}, kind: 'all', query: '', selected: '', tab: 'apps', serial: '', loaded: false},
   bugreports: {items: [], status: {state: 'idle'}, timer: null},
+  performance: {status: {state: 'idle', samples: []}, timer: null, applicationsLoaded: false, sessions: [], selectedSessions: new Set()},
   modalStack: [],
   adbOperationTab: 'commands', offlinePreset: {loadedName: '', baseline: ''},
   logPreset: {loadedName: '', baseline: ''}, command: {loadedName: '', baseline: '', result: null},

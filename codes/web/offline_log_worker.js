@@ -88,7 +88,9 @@ self.onmessage = async ({ data }) => {
   const progress = { filesDone: 0, filesTotal: data.files.length, bytes: 0, totalBytes: data.totalBytes, lastUpdate: Date.now() };
   let skipped = 0;
   try {
-    for (const fileInfo of data.files) {
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+    const files = [...data.files].sort((left, right) => collator.compare(left.name, right.name));
+    for (const fileInfo of files) {
       if (cancelled) break;
       const result = await scanFile(fileInfo, data.filters, progress);
       if (result.binary) skipped += 1;

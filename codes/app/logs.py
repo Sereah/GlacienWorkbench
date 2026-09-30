@@ -305,6 +305,12 @@ def pcre_pattern(filters: list[dict]) -> str:
             clauses.append(f"(?!.*(?:{'|'.join(escaped)}))")
     return "(?i)^" + "".join(clauses) + ".*$"
 
+
+def _natural_path_key(value: object) -> tuple:
+    """按路径中的数字段自然排序，避免 log.10 排在 log.9 前面。"""
+    parts = re.split(r"(\d+)", str(value or "").replace("\\", "/").casefold())
+    return tuple((1, int(part)) if part.isdigit() else (0, part) for part in parts)
+
 def query(settings: dict, body: dict) -> dict:
     """用 rg --json 查询受配置白名单约束的文件或目录，返回匹配行及来源行号。"""
     source_name, source = source_path(settings, body.get("source"))
@@ -341,4 +347,7 @@ def query(settings: dict, body: dict) -> dict:
             except ValueError:
                 relative = str(file_path)
         results.append({"file": relative, "line": data.get("line_number", 0), "text": text})
+    # rg 扫描目录时可能并行处理文件，输出顺序不是稳定的文件顺序。
+    # 不猜测正文时间格式，只恢复“自然文件名 + 文件内行号”的原始证据顺序。
+    results.sort(key=lambda item: (_natural_path_key(item["file"]), int(item["line"] or 0)))
     return {"source": source_name, "path": str(source), "results": results, "elapsed_seconds": round(time.monotonic() - started, 3)}

@@ -4,7 +4,8 @@ const configDomainFields = {
   signing: ['signing'], resources: ['resource_device_paths'], processes: ['process_package_keywords', 'watched_packages', 'app_launches'],
   broadcasts: ['broadcasts'], live_logs: ['log_filters'], offline_logs: ['offline_filter_presets', 'offline_log_sources'],
   device_logs: ['device_log_sources'], commands: ['adb_commands', 'adb_command_categories'], captures: ['scrcpy_path'],
-  audio_processing: ['ffmpeg_path', 'audio_sample_format', 'audio_sample_rate', 'audio_channels'], themes: ['selected_theme'],
+  audio_processing: ['ffmpeg_path', 'audio_sample_format', 'audio_sample_rate', 'audio_channels'],
+  performance_diagnostics: ['sample_interval_seconds'], themes: ['selected_theme'],
 };
 
 function cloneConfig(value) { return JSON.parse(JSON.stringify(value)); }

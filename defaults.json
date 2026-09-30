@@ -6,6 +6,7 @@
   "audio_sample_format": "s16le",
   "audio_sample_rate": 48000,
   "audio_channels": 2,
+  "sample_interval_seconds": 1,
   "process_package_keywords": [],
   "watched_packages": [],
   "log_filters": {},
