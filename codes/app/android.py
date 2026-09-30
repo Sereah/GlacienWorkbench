@@ -398,6 +398,70 @@ def _mdns_wireless_endpoints(settings: dict) -> list[tuple[str, int]]:
             endpoints.append(parsed)
     return endpoints
 
+def _mdns_services(settings: dict, service_types: set[str]) -> list[dict]:
+    """读取指定类型的 ADB mDNS 服务，并保留服务名用于区分同网段设备。"""
+    code, output, _ = adb(settings, "mdns", "services", timeout=5)
+    if code:
+        return []
+    services = []
+    seen = set()
+    for line in output.splitlines():
+        columns = line.split()
+        if len(columns) < 3 or columns[-2] not in service_types:
+            continue
+        endpoint = _wireless_serial(columns[-1])
+        if not endpoint or (columns[-2], endpoint) in seen:
+            continue
+        seen.add((columns[-2], endpoint))
+        services.append({
+            "name": " ".join(columns[:-2]),
+            "service": columns[-2],
+            "ip": endpoint[0],
+            "port": endpoint[1],
+            "endpoint": _endpoint_text(*endpoint),
+        })
+    return services
+
+def wireless_pairing_status(settings: dict) -> dict:
+    """返回 Android 11+ 无线调试的配对与连接 mDNS 服务。"""
+    executable = tool("adb", settings)
+    if not executable:
+        return {"supported": False, "message": "未找到 adb", "pairing_services": [], "connect_services": []}
+    code, output, error = adb(settings, "help", timeout=5)
+    help_text = f"{output}\n{error}".lower()
+    supported = code == 0 and bool(re.search(r"(?m)^\s*pair\s+", help_text))
+    services = _mdns_services(settings, {"_adb-tls-pairing._tcp", "_adb-tls-connect._tcp"}) if supported else []
+    return {
+        "supported": supported,
+        "message": "ADB 支持无线配对" if supported else "当前 Platform Tools 不支持 adb pair，请升级后重试",
+        "pairing_services": [item for item in services if item["service"] == "_adb-tls-pairing._tcp"],
+        "connect_services": [item for item in services if item["service"] == "_adb-tls-connect._tcp"],
+    }
+
+def pair_wireless(settings: dict, body: dict) -> dict:
+    """通过标准输入传递一次性配对码，避免敏感值出现在命令参数中。"""
+    ip, port = _wireless_endpoint(body.get("ip"), body.get("port"))
+    pairing_code = str(body.get("pairing_code") or "").strip()
+    if not re.fullmatch(r"\d{6}", pairing_code):
+        raise ValueError("请输入设备显示的六位无线配对码")
+    executable = tool("adb", settings)
+    if not executable:
+        raise ValueError("未找到 adb，请安装或配置 Android Platform-Tools")
+    try:
+        result = proc.run(
+            [executable, "pair", _endpoint_text(ip, port)], input=pairing_code + "\n",
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20, check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise ValueError("无线配对超时；配对服务或配对码可能已经过期") from error
+    except OSError as error:
+        raise ValueError(f"无法启动 adb pair：{error}") from error
+    output = (result.stdout or result.stderr or "").strip()
+    if result.returncode or "successfully paired" not in output.lower():
+        raise ValueError(output or "无线配对失败，请确认 IP、配对端口和配对码")
+    status = wireless_pairing_status(settings)
+    return {"ok": True, "endpoint": _endpoint_text(ip, port), "message": output, "connect_services": status["connect_services"]}
+
 def _tcp_endpoint_open(ip: str, port: int, timeout: float = .22) -> bool:
     connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     connection.settimeout(timeout)

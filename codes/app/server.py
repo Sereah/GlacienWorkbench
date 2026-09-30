@@ -7,11 +7,19 @@ from urllib.error import URLError
 from urllib.request import urlopen
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs,urlparse
-from . import android,artifacts,audio,captures,config,device,device_files,device_logs,logs,runtime,themes
+from urllib.parse import parse_qs,quote,urlparse
+from . import android,app_manager,artifacts,audio,bugreports,captures,config,device,device_files,device_logs,logs,runtime,themes
 
 # 前端是只读程序资源；settings、日志和产物由 config.ROOT 指向可写数据目录。
 STATIC=runtime.resource_path("web").resolve()
+
+
+def download_disposition(name):
+    """同时提供 ASCII 回退与 UTF-8 原名，兼容 Qt WebEngine 的保存文件名解析。"""
+    fallback=re.sub(r"[^A-Za-z0-9._-]+","_",str(name or "")).strip("_") or "download"
+    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(str(name or fallback))}"
+
+
 class Server(ThreadingHTTPServer):
     allow_reuse_address=True
     daemon_threads=True
@@ -50,7 +58,7 @@ class Handler(BaseHTTPRequestHandler):
     def reply(self,data,status=200):
         body=json.dumps(data,ensure_ascii=False).encode();self.send_response(status);self.send_header("Content-Type","application/json; charset=utf-8");self.send_header("Content-Length",str(len(body)));self.end_headers();self.wfile.write(body)
     def body(self): return json.loads(self.rfile.read(int(self.headers.get("Content-Length","0"))) or b"{}")
-    def file_reply(self,path):
+    def file_reply(self,path,download_name=None):
         size=path.stat().st_size;start,end=0,size-1;status=200;header=self.headers.get("Range","")
         if header:
             match=re.fullmatch(r"bytes=(\d*)-(\d*)",header.strip())
@@ -60,6 +68,7 @@ class Handler(BaseHTTPRequestHandler):
             if start>min(end,size-1): return self.reply({"error":"Range 超出文件范围"},416)
             end=min(end,size-1);status=206
         length=end-start+1;self.send_response(status);self.send_header("Content-Type",mimetypes.guess_type(path.name)[0] or "application/octet-stream");self.send_header("Cache-Control","no-store");self.send_header("Accept-Ranges","bytes");self.send_header("Content-Length",str(length));
+        if download_name:self.send_header("Content-Disposition",download_disposition(download_name))
         if status==206:self.send_header("Content-Range",f"bytes {start}-{end}/{size}")
         self.end_headers();
         with path.open("rb") as stream:
@@ -86,6 +95,7 @@ class Handler(BaseHTTPRequestHandler):
             if route=="/api/status": return self.reply({"device":android.status(settings,q.get("serial",[""])[0]),"platform":platform.system(),"adb":bool(android.tool("adb",settings))})
             if route=="/api/adb/restart": return self.reply(android.restart_server(settings))
             if route=="/api/adb/wireless-suggestion": return self.reply(android.wireless_suggestion(settings,q.get("serial",[""])[0]))
+            if route=="/api/adb/pairing-status": return self.reply(android.wireless_pairing_status(settings))
             if route=="/api/config": return self.reply(config.payload(settings))
             if route=="/api/user-guide": return self.reply({"markdown":runtime.user_guide_markdown()})
             if route=="/api/themes": return self.reply(themes.catalog())
@@ -96,10 +106,13 @@ class Handler(BaseHTTPRequestHandler):
             if route=="/api/keystore-files": return self.reply(artifacts.keystore_files(settings))
             if route=="/api/resources": return self.reply(artifacts.resources(settings))
             if route=="/api/processes": return self.reply(device.processes(android.selected_device_settings(settings,q.get("serial",[""])[0])))
+            if route=="/api/apps": return self.reply(app_manager.applications(android.selected_device_settings(settings,q.get("serial",[""])[0])))
+            if route=="/api/apps/details": return self.reply(app_manager.details(android.selected_device_settings(settings,q.get("serial",[""])[0]),q.get("package",[""])[0]))
             if route=="/api/log-filters": return self.reply(device.log_filters(settings))
             if route=="/api/log-process":
                 selected=android.selected_device_settings(settings,q.get("serial",[""])[0])
-                rule=device.saved_log_filter(settings,q.get("preset",[""])[0])
+                process_name=q.get("process",[""])[0] if q.get("process_override",[""])[0]=="1" else None
+                rule=device.log_session_filter(settings,q.get("preset",[""])[0],process_name)
                 return self.reply(device.resolve_log_process(selected,rule))
             if route=="/api/broadcasts": return self.reply(device.broadcasts(settings))
             if route=="/api/adb-commands": return self.reply(device.adb_commands(settings))
@@ -118,8 +131,14 @@ class Handler(BaseHTTPRequestHandler):
             if route=="/api/captures/file": return self.file_reply(captures.resolve_file(q.get("id",[""])[0]))
             if route=="/api/device-files/list": return self.reply(device_files.list_directory(android.selected_device_settings(settings,q.get("serial",[""])[0]),q.get("path",["/sdcard"])[0]))
             if route=="/api/device-files/download": return self.file_reply(device_files.resolve_download(q.get("id",[""])[0]))
+            if route=="/api/bugreports/status": return self.reply(bugreports.status())
+            if route=="/api/bugreports/files": return self.reply(bugreports.files())
+            if route=="/api/bugreports/download":
+                path=bugreports.resolve_file(q.get("id",[""])[0])
+                return self.file_reply(path,path.name)
             if route=="/api/logs":
-                rule=device.saved_log_filter(settings,q.get("preset",[""])[0])
+                process_name=q.get("process",[""])[0] if q.get("process_override",[""])[0]=="1" else None
+                rule=device.log_session_filter(settings,q.get("preset",[""])[0],process_name)
                 selected=android.selected_device_settings(settings,q.get("serial",[""])[0])
                 return self.logs(selected,rule)
             return self.static(route)
@@ -140,7 +159,7 @@ class Handler(BaseHTTPRequestHandler):
             settings,body=config.load(),self.body(); route=self.path
             # 先拒绝空/未知日志规则，避免未连接设备时掩盖“全部日志”绕过问题。
             if route=="/api/logs/export": device.saved_log_filter(settings, body.get("preset", ""))
-            selected=android.selected_device_settings(settings,body.get("serial","")) if route in {"/api/install","/api/apks/push","/api/resources/push","/api/processes/stop","/api/processes/launch","/api/processes/uninstall","/api/processes/cert-sha256","/api/broadcasts/send","/api/adb-commands/run","/api/logs/export","/api/logs/clear","/api/device-logs/scan","/api/device-logs/pull","/api/captures/screenshot","/api/captures/record/start","/api/captures/scrcpy/launch","/api/device-files/pull","/api/device-files/pull-batch","/api/device-files/delete","/api/device-files/delete-batch","/api/device-files/create-directory","/api/device-files/create-file","/api/device-files/preview","/api/adb/root","/api/adb/remount","/api/adb/reboot"} else settings
+            selected=android.selected_device_settings(settings,body.get("serial","")) if route in {"/api/install","/api/apks/push","/api/resources/push","/api/processes/stop","/api/processes/launch","/api/processes/uninstall","/api/processes/cert-sha256","/api/apps/launch","/api/apps/stop","/api/apps/clear","/api/apps/enabled","/api/apps/uninstall","/api/apps/pull-apk","/api/bugreports/start","/api/broadcasts/send","/api/adb-commands/run","/api/logs/export","/api/logs/clear","/api/device-logs/scan","/api/device-logs/pull","/api/captures/screenshot","/api/captures/record/start","/api/captures/scrcpy/launch","/api/device-files/pull","/api/device-files/pull-batch","/api/device-files/delete","/api/device-files/delete-batch","/api/device-files/create-directory","/api/device-files/create-file","/api/device-files/preview","/api/adb/root","/api/adb/remount","/api/adb/reboot"} else settings
             actions={"/api/install":lambda:artifacts.install(selected,body),"/api/apks/md5":lambda:artifacts.checksum(settings,body),"/api/apks/delete":lambda:artifacts.delete(settings,body),"/api/apks/sign":lambda:artifacts.sign(settings,body),"/api/resources/md5":lambda:artifacts.resource_checksum(settings,body),"/api/resources/delete":lambda:artifacts.delete_resource(settings,body),"/api/resources/push":lambda:artifacts.push(selected,body),"/api/processes/stop":lambda:device.stop(selected,body.get("package","")),"/api/processes/launch":lambda:device.launch(selected,body.get("package",""))}
             actions["/api/apks/collect"] = lambda: artifacts.collect_apks(settings, body)
             actions["/api/apks/sha256"] = lambda: artifacts.sha256_checksum(settings, body)
@@ -156,10 +175,20 @@ class Handler(BaseHTTPRequestHandler):
             actions["/api/adb/remount"] = lambda: android.remount_device(selected)
             actions["/api/adb/reboot"] = lambda: android.reboot_device(selected)
             actions["/api/adb/connect"] = lambda: android.connect_wireless(settings, body)
+            actions["/api/adb/pair"] = lambda: android.pair_wireless(settings, body)
             actions["/api/adb/wireless-scan"] = lambda: android.scan_wireless(settings, body)
             actions["/api/adb/wireless-disconnect"] = lambda: android.disconnect_wireless(settings, body)
             actions["/api/adb/wireless-cleanup"] = lambda: android.clean_offline_wireless(settings)
             actions["/api/adb/force-kill"] = lambda: android.force_kill_adb()
+            actions["/api/apps/launch"] = lambda: app_manager.launch(selected, body.get("package", ""))
+            actions["/api/apps/stop"] = lambda: app_manager.stop(selected, body.get("package", ""))
+            actions["/api/apps/clear"] = lambda: app_manager.clear_data(selected, body.get("package", ""), body.get("confirmed"))
+            actions["/api/apps/enabled"] = lambda: app_manager.set_enabled(selected, body.get("package", ""), body.get("enabled"), body.get("confirmed"))
+            actions["/api/apps/uninstall"] = lambda: app_manager.uninstall(selected, body.get("package", ""), body.get("confirmed"))
+            actions["/api/apps/pull-apk"] = lambda: app_manager.pull_apk(selected, body.get("package", ""))
+            actions["/api/bugreports/start"] = lambda: bugreports.start(selected, body)
+            actions["/api/bugreports/cancel"] = bugreports.cancel
+            actions["/api/bugreports/delete"] = lambda: bugreports.delete(body.get("id", ""))
             actions["/api/offline-logs/query"] = lambda: logs.query(settings, body)
             actions["/api/offline-logs/extract"] = lambda: logs.extract_archives(settings, body)
             actions["/api/audio/ffmpeg/path"] = lambda: audio.save_ffmpeg_path(body.get("path", ""))
@@ -167,7 +196,7 @@ class Handler(BaseHTTPRequestHandler):
             actions["/api/audio/preview"] = lambda: audio.preview(settings, body)
             actions["/api/audio/delete"] = lambda: audio.delete(body.get("id", ""))
             actions["/api/audio/reveal"] = audio.reveal_outputs
-            actions["/api/logs/export"] = lambda: device.export(selected, body.get("preset", ""))
+            actions["/api/logs/export"] = lambda: device.export(selected, body.get("preset", ""), body.get("process_name") if "process_name" in body else None)
             actions["/api/logs/clear"] = lambda: device.clear_logcat(selected)
             actions["/api/device-logs/scan"] = lambda: device_logs.scan(selected, body)
             actions["/api/device-logs/pull"] = lambda: device_logs.pull(selected, body)

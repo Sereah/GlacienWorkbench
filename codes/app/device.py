@@ -24,6 +24,8 @@ RISKY_ADB_PREFIXES = (
 )
 PROCESS_NAME = re.compile(r"[A-Za-z0-9_.-]+(?::[A-Za-z0-9_.-]+)?")
 THREADTIME_PID = re.compile(r"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+(\d+)\s+\d+\s+")
+PACKAGE_VERSION_NAME = re.compile(r"^\s*versionName=(.*?)\s*$", re.MULTILINE)
+PACKAGE_VERSION_CODE = re.compile(r"^\s*versionCode=(\d+)(?:\s|$)", re.MULTILINE)
 
 def adb_commands(settings):
     """返回当前功能配置的自定义 ADB 命令，配置内容不携带 adb 可执行路径。"""
@@ -100,15 +102,28 @@ def run_adb_command(settings, body):
     started = time.monotonic(); code, output, error = android.device_adb(settings, *args, timeout=timeout); elapsed = round(time.monotonic() - started, 3)
     return {"requires_confirmation": False, "risky": risky, "ok": code == 0, "exit_code": code, "stdout": output, "stderr": error, "elapsed_seconds": elapsed, "command": ["adb", "-s", settings["_selected_adb_serial"], *args]}
 
+def package_version(package_dump: str) -> dict[str, str]:
+    """从 dumpsys package 输出中提取面向用户和系统内部版本号。"""
+    name_match = PACKAGE_VERSION_NAME.search(package_dump or "")
+    code_match = PACKAGE_VERSION_CODE.search(package_dump or "")
+    version_name = name_match.group(1).strip() if name_match else ""
+    if version_name.lower() == "null":
+        version_name = ""
+    return {
+        "version_name": version_name,
+        "version_code": code_match.group(1) if code_match else "",
+    }
+
+
 def processes(settings):
-    """按全局包名关键字列应用，并比较每个应用是否为平台签名。"""
+    """按全局包名关键字列应用；刷新阶段只执行包列表和进程列表查询。"""
     keywords=settings.get("process_package_keywords",[])
     _,packages,error=android.device_adb(settings,"shell","pm","list","packages")
     if error: raise ValueError(error)
-    platform_sig=android.signature(android.device_adb(settings,"shell","dumpsys","package","android")[1]); _,ps,_=android.device_adb(settings,"shell","ps","-A"); result=[]
+    _,ps,_=android.device_adb(settings,"shell","ps","-A"); result=[]
     for package in [x.removeprefix("package:") for x in packages.splitlines() if any(k.lower() in x.lower() for k in keywords)]:
-        row=next((x for x in ps.splitlines()[1:] if x.split() and (x.split()[-1]==package or x.split()[-1].startswith(package+":"))),None); signature=android.signature(android.device_adb(settings,"shell","dumpsys","package",package)[1]); state="unknown" if not signature or not platform_sig else ("platform" if signature==platform_sig else "non_platform")
-        result.append({"package":package,"pid":row.split()[1] if row and len(row.split())>1 else None,"running":bool(row),"signature":signature,"signature_status":state,"launch_configured":package in launch_configs(settings)})
+        row=next((x for x in ps.splitlines()[1:] if x.split() and (x.split()[-1]==package or x.split()[-1].startswith(package+":"))),None)
+        result.append({"package":package,"pid":row.split()[1] if row and len(row.split())>1 else None,"running":bool(row),"signature":"","signature_status":"not_checked","version_name":"","version_code":"","launch_configured":package in launch_configs(settings)})
     return result
 
 def installed_apk_certificate_sha256(settings, package):
@@ -242,6 +257,15 @@ def saved_log_filter(settings, name):
         raise ValueError("所选日志规则不存在，请刷新后重新选择")
     return normalize_log_filter(rule)
 
+
+def log_session_filter(settings, name, process_name=None):
+    """为单次监听叠加进程筛选，不要求把运行参数写入分析方案。"""
+    rule = saved_log_filter(settings, name)
+    if process_name is None:
+        return rule
+    return normalize_log_filter({**rule, "process_name": str(process_name or "").strip()})
+
+
 def selected_filter(settings, name):
     """兼容调用点名称；不再接受临时关键词或空规则。"""
     return saved_log_filter(settings, name)
@@ -330,9 +354,9 @@ def clear_logcat(settings):
     if code: raise ValueError(error or output or "清空设备 Logcat 缓冲区失败")
     return {"ok": True, "message": "设备 Logcat 缓冲区已清空"}
 
-def export(settings, preset):
+def export(settings, preset, process_name=None):
     """只导出已保存规则命中的 Logcat，避免“全部日志”造成无意义的大文件。"""
-    rule = saved_log_filter(settings, preset)
+    rule = log_session_filter(settings, preset, process_name)
     process=resolve_log_process(settings,rule);process_ids=set(process["pids"]) if process["name"] else None
     lines = buffer(settings)
     lines = [line for line in lines if matches(line, rule, process_ids)]

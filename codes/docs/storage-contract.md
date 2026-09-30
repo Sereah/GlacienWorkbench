@@ -18,7 +18,7 @@
 | `apk_center` | APK 来源、Push 路径与 APK 文件 |
 | `signing` | 签名配置与 Keystore |
 | `resources` | 资源部署路径与资源包 |
-| `processes` | 进程过滤与拉起配置 |
+| `processes` | 关注应用包名、关键词匹配与特殊拉起配置 |
 | `broadcasts` | 广播预设 |
 | `live_logs` | 实时日志预设与导出日志 |
 | `offline_logs` | 离线日志预设与本地来源 |
@@ -28,6 +28,7 @@
 | `captures` | 截图、录屏和 scrcpy 配置 |
 | `themes` | 用户导入主题 |
 | `device_files` | Device Explorer 下载文件 |
+| `bugreports` | 完整系统 Bugreport 诊断包与任务临时目录 |
 | `runtime` | WebEngine Profile 与迁移备份 |
 
 ## 修改功能时的判断

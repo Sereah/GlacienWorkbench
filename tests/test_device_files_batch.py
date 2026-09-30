@@ -1,12 +1,27 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 from codes.app import device_files
 
 
 class DeviceFilesBatchTest(unittest.TestCase):
+    def test_pull_known_file_uses_download_staging(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(device_files, "DOWNLOAD_ROOT", Path(folder)):
+            def adb_call(_settings, *args, **_kwargs):
+                Path(args[-1]).write_bytes(b"apk")
+                return 0, "pulled", ""
+
+            with patch.object(device_files.android, "device_adb", side_effect=adb_call) as adb:
+                result = device_files.pull_known_file({"_selected_adb_serial": "SERIAL"}, "/data/app/base.apk", "com.example.apk")
+
+        self.assertEqual("com.example.apk", result["name"])
+        self.assertTrue(result["url"].startswith("/api/device-files/download?id="))
+        self.assertEqual(("pull", "/data/app/base.apk"), adb.call_args.args[1:3])
+
     def test_batch_entries_require_same_parent_and_unique_paths(self):
         with self.assertRaisesRegex(ValueError, "至少选择"):
             device_files._fresh_entries({}, [])

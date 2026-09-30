@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shlex
 import uuid
 
@@ -89,6 +90,14 @@ def normalize(feature: str, value: dict) -> dict:
         launches = value.get("app_launches", {})
         if not isinstance(launches, dict):
             raise ValueError("processes.app_launches 必须是对象")
+        watched = value.get("watched_packages", [])
+        if not isinstance(watched, list):
+            raise ValueError("processes.watched_packages 必须是数组")
+        watched_packages = []
+        for raw_package in watched:
+            package = str(raw_package).strip()
+            if package and re.fullmatch(r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*", package) and package not in watched_packages:
+                watched_packages.append(package)
         normalized = {}
         for package, raw in launches.items():
             if not isinstance(raw, dict):
@@ -96,7 +105,7 @@ def normalize(feature: str, value: dict) -> dict:
             command = _legacy_launch_command(str(package), raw)
             retained = {key: item for key, item in raw.items() if key not in {"action", "component", "activity", "extras"}}
             normalized[package] = {**retained, "command": command}
-        return {**value, "app_launches": normalized}
+        return {**value, "watched_packages": watched_packages, "app_launches": normalized}
     if feature != "commands":
         return value
     commands = value.get("commands", {})

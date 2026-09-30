@@ -107,6 +107,20 @@ class StorageCompatibilityTest(unittest.TestCase):
         value = storage.read("processes", storage.default("processes"))
 
         self.assertEqual({"command": "am start -n com.example/.MainActivity"}, value["app_launches"]["com.example"])
+        self.assertEqual([], value["watched_packages"])
+
+    def test_processes_adds_watched_packages_without_losing_existing_values(self):
+        storage.update("processes", {
+            "process_package_keywords": ["vehicle"],
+            "watched_packages": ["com.example.app", "com.example.app", "bad/package"],
+            "app_launches": {"com.example.app": {"command": "am start -n com.example.app/.MainActivity"}},
+        })
+
+        value = storage.read("processes", storage.default("processes"))
+
+        self.assertEqual(["vehicle"], value["process_package_keywords"])
+        self.assertEqual(["com.example.app"], value["watched_packages"])
+        self.assertIn("com.example.app", value["app_launches"])
 
     def test_domain_update_does_not_rewrite_other_domains(self):
         storage.update("broadcasts", {"broadcasts": {"A": {}}, "unknown_future_field": "keep"})
@@ -115,6 +129,16 @@ class StorageCompatibilityTest(unittest.TestCase):
         config.update_domain("commands", {"adb_commands": {}, "adb_command_categories": []})
 
         self.assertEqual(before, storage.path("broadcasts").read_bytes())
+
+    def test_registering_bugreports_does_not_rewrite_existing_user_data(self):
+        storage.update("processes", {"process_package_keywords": ["vehicle"], "unknown_future_field": {"keep": True}})
+        before = storage.path("processes").read_bytes()
+
+        storage.initialize()
+
+        self.assertEqual(before, storage.path("processes").read_bytes())
+        self.assertTrue(storage.data_dir("bugreports", "files").is_dir())
+        self.assertTrue(storage.data_dir("bugreports", "runtime").is_dir())
 
     def test_audio_processing_domain_keeps_stable_metadata(self):
         result = config.update_domain("audio_processing", {

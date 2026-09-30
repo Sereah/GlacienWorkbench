@@ -1,6 +1,6 @@
 # 设备工具：屏幕捕获
 
-“设备工具”提供屏幕捕获、设备文件和日志 Pull 三个独立标签。设备文件浏览、Pull、上传和删除见 [device-files.md](device-files.md)，设备日志导出见 [device-logs.md](device-logs.md)，二者都不能与本地媒体库逻辑混用。
+“设备工具”提供屏幕捕获、设备文件、日志Pull 和 Bugreport采集四个同级标签。设备文件浏览、Pull、上传和删除见 [device-files.md](device-files.md)，设备日志导出见 [device-logs.md](device-logs.md)，这些数据都不能与本地媒体库逻辑混用。
 
 ## 截图
 

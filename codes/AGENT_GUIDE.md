@@ -10,6 +10,7 @@
 - `docs/device-logs.md`：设备日志源、时间识别与安全 Pull。
 - `docs/captures.md`：截图、录屏、scrcpy 和媒体文件。
 - `docs/device-files.md`：设备文件浏览、Pull、上传与删除。
+- `docs/apps-and-bugreports.md`：全量应用管理、Android 11 无线配对与 Bugreport 长任务。
 - `docs/audio-processing.md`：外置 FFmpeg、PCM 参数和多通道播放预览。
 - `docs/desktop.md`：Qt WebEngine 桌面宿主和三端构建。
 
@@ -19,10 +20,10 @@ Glacien Workbench 是本地开发工作站，后端仅监听 `127.0.0.1`。桌�
 
 主要能力包括：
 
-- 多 ADB 设备选择、USB/无线连接和设备状态。
+- 多 ADB 设备选择、USB/无线连接、Android 11+ 配对和设备状态。
 - APK 安装、签名、校验、收集与推送，以及资源部署。
-- 进程管理、自定义命令和广播发送。
-- 实时 Logcat、离线日志分析和设备日志 Pull。
+- 全量应用管理、关注应用、自定义命令和广播发送。
+- 实时 Logcat、离线日志分析、设备日志 Pull 和完整 Bugreport 采集。
 - 截图、连续截图、录屏、截图对比和 scrcpy 投屏。
 - 设备文件浏览、新建、文本预览、上传、下载和删除。
 - 内置主题与用户主题导入、导出和删除。
@@ -61,9 +62,9 @@ desktop_launcher.py
 ADB 工具
   ADB 概览
   部署中心：安装 APK / 签名 APK / 资源部署
-  进程管理
+  应用与进程：应用管理 / 关注应用
   ADB 命令：自定义命令 / 发送广播
-  设备工具：屏幕捕获 / 设备文件 / 日志 Pull
+  设备工具：屏幕捕获 / 设备文件 / 日志Pull / Bugreport采集
   实时日志
 
 本地工具
@@ -82,7 +83,9 @@ ADB 工具
 | `app/config.py` | 聚合配置视图、按域保存及规则/命令导入导出 |
 | `app/android.py` | SDK 工具定位、ADB 执行、设备状态和无线发现 |
 | `app/artifacts.py` | APK、Keystore、签名和资源包 |
-| `app/device.py` | 进程、拉起、广播、自定义命令和实时日志 |
+| `app/device.py` | 兼容进程接口、特殊拉起、广播、自定义命令和实时日志 |
+| `app/app_manager.py` | 全量应用列表、按需详情和应用管理操作 |
+| `app/bugreports.py` | Bugreport 长任务、状态和受控 ZIP 文件 |
 | `app/logs.py` | 原生 rg 离线日志扫描 |
 | `app/audio.py` | 外置 FFmpeg 探测、PCM 文件和 WAV 播放预览 |
 | `app/device_logs.py` | 设备日志源扫描、时间筛选和白名单 Pull |
@@ -91,7 +94,13 @@ ADB 工具
 | `app/themes.py` | 内置主题与用户主题的校验和合并 |
 | `app/server.py` | HTTP API、SSE、静态文件和服务生命周期 |
 | `web/index.html` | 页面结构 |
-| `web/app.js` | 浏览器状态、API 调用和渲染 |
+| `web/core/state.js`、`api.js`、`dom.js`、`desktop.js` | 跨页面状态、API、DOM 通用能力和桌面桥 |
+| `web/features/shell.js` | 主题、导航、页面聚合与设备状态 |
+| `web/features/deployment-and-device.js` | APK、签名、广播和基础实时日志逻辑 |
+| `web/features/workbench.js` | 离线日志、设备工具、配置弹窗、规则分享和命令编辑增强 |
+| `web/features/realtime-logs.js` | 实时日志会话、运行态和草稿保护增强 |
+| `web/features/audio.js`、`app-manager.js`、`wireless-pairing.js`、`bugreports.js` | 独立业务功能 |
+| `web/app.js` | 前端启动编排，不承载具体功能实现 |
 | `web/styles.css` | 布局与主题语义样式 |
 | `web/themes.json` | 内置主题、颜色令牌和中文用途说明 |
 | `web/offline_log_worker.js` | 浏览器模式离线日志分块扫描 |
@@ -167,7 +176,7 @@ ADB 工具
 
 ### 进程、拉起与命令
 
-- 进程页面通过 `dumpsys package android` 与目标包信息判断平台签名状态。
+- 应用管理与关注应用复用同一份应用快照、同一卡片和同一详情页；关注列表合并手动星标 `watched_packages` 与原有关键词匹配。详情页通过目标包与 `dumpsys package android` 判断平台签名，并按需读取证书 SHA-256。不要恢复第二套关注应用查询和渲染链路。
 - 应用拉起配置保存于 `app_launches.<package>.command`，内容是 `adb shell` 后的完整设备端命令。后端只允许 `am start` 和 `am start-activity`。
 - 自定义命令由 `device.device_shell_args()` 解析，并通过 `android.device_adb()` 执行。主机侧 `connect`、`push`、`pull` 和 `install` 由专用功能负责。
 - 风险命令返回 `requires_confirmation`；前端展示最终命令，用户确认后以 `confirmed=true` 再次请求。
@@ -188,6 +197,8 @@ ADB 工具
 “清空显示”只清理页面；“清空日志”停止当前 SSE、执行 `adb logcat -b all -c`，然后按需重新监听。前端使用会话编号忽略旧 EventSource 的在途事件。
 
 日志筛选条件支持 `include_any`、`include_all` 和 `exclude_any`，条件之间为 AND。表达式分别使用 `(a | b)`、`(a & b)` 和 `!(a | b)`，只用于声明式转换；复制 grep/rg 时由前端生成经过 Shell 引号保护的命令。实时与离线日志共用条件行和高亮编辑组件，方案在弹窗中完整展示，不使用折叠层。日志高亮使用固定六色，不属于主题配色。
+
+实时日志的进程筛选位于方案弹窗之外，只作为本次监听与导出的运行参数。新页面通过请求参数明确覆盖旧方案中可能存在的 `process_name`，但保存方案时必须保留旧字段，不能借 UI 调整损坏已有用户数据。
 
 ### 离线日志
 
@@ -216,9 +227,11 @@ ADB 工具
 | --- | --- |
 | `/api/status` | ADB 和设备状态 |
 | `/api/adb/wireless-suggestion` | 无线地址建议及网络信息 |
+| `/api/adb/pairing-status` | Android 11+ 配对能力与 mDNS 服务 |
 | `/api/config` | 聚合配置只读视图及 `_meta` |
 | `/api/themes` | 内置与用户主题目录 |
 | `/api/apks`、`/api/resources`、`/api/processes` | 部署和进程数据 |
+| `/api/apps`、`/api/apps/details` | 全量应用列表与按需详情 |
 | `/api/log-filters`、`/api/broadcasts`、`/api/adb-commands` | 已保存规则和命令 |
 | `/api/offline-log-sources`、`/api/offline-logs/status` | 离线日志来源与 rg 能力 |
 | `/api/audio/status`、`/api/audio/files` | FFmpeg 能力与 PCM 文件 |
@@ -226,6 +239,7 @@ ADB 工具
 | `/api/device-log-sources` | 设备日志来源 |
 | `/api/captures/*` | 屏幕捕获状态和媒体文件 |
 | `/api/device-files/*` | 设备目录和已下载文件 |
+| `/api/bugreports/status`、`/api/bugreports/files` | Bugreport 任务和历史文件 |
 | `/api/logs` | 实时 Logcat SSE |
 
 主要 POST 接口：
@@ -235,12 +249,14 @@ ADB 工具
 | `/api/config/domain` | 按稳定域更新配置 |
 | `/api/config/export`、`/api/config/import` | 导出或合并可分享规则 |
 | `/api/adb/connect` | 连接指定无线 endpoint |
+| `/api/adb/pair` | 使用请求级配对码完成 Android 11+ 无线配对 |
 | `/api/adb/wireless-scan` | 发现当前网络中的无线 ADB 候选 |
 | `/api/adb/wireless-cleanup` | 清理 offline 无线 transport |
 | `/api/adb/wireless-disconnect` | 断开指定无线 endpoint |
 | `/api/adb/root`、`/api/adb/remount`、`/api/adb/reboot` | 设备系统操作 |
 | `/api/apks/*`、`/api/resources/*` | APK、签名和资源操作 |
 | `/api/processes/*` | 进程停止、拉起、卸载和证书读取 |
+| `/api/apps/*` | 应用启动、停止、清数据、启停、卸载和 Pull APK |
 | `/api/adb-commands/*`、`/api/broadcasts/send` | 自定义命令和广播 |
 | `/api/logs/export`、`/api/logs/clear` | 实时日志导出和清空 |
 | `/api/offline-logs/query` | 原生 rg 离线扫描，默认安全展开压缩日志 |
@@ -250,11 +266,12 @@ ADB 工具
 | `/api/device-logs/*` | 设备日志扫描、Pull 和结果目录打开 |
 | `/api/captures/*` | 截图、录屏、scrcpy 和媒体管理 |
 | `/api/device-files/*` | 设备文件新建、有限预览、单项/批量 Pull、上传和删除 |
+| `/api/bugreports/*` | Bugreport 启动、取消、下载和删除 |
 | `/api/themes/import`、`/api/themes/delete` | 用户主题管理 |
 
 ## 前端维护约束
 
-- `web/app.js` 的全局状态集中在 `state`。
+- 跨页面状态和 API 入口集中在 `web/core/runtime.js`；功能页面逻辑优先放入 `web/features/`，不要继续扩大 `web/app.js`。
 - `state.logs` 保存当前 EventSource，停止日志时必须关闭。
 - `state.adbSerial` 是 Web Profile 中的当前设备选择，不写入功能 JSON。
 - 设备状态每 5 秒刷新；只有离线到在线的边沿调用 `refreshAll()`，轮询不重建 Logcat SSE。

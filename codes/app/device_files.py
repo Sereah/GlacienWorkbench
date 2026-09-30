@@ -171,6 +171,22 @@ def _download_response(output: Path, name: str) -> dict:
     return {"ok": True, "name": name, "size": output.stat().st_size, "id": identifier, "url": "/api/device-files/download?id=" + identifier}
 
 
+def pull_known_file(settings: dict, remote_path: object, download_name: object) -> dict:
+    """Pull 后端已解析出的设备文件，并返回浏览器下载 URL。
+
+    该入口只供后端领域模块调用，不能直接暴露浏览器提供的设备路径。
+    """
+    path = device_path(remote_path, allow_root=False)
+    name = file_name(download_name)
+    folder = _download_folder(str(settings.get("_selected_adb_serial", "")))
+    output = folder / _safe_slug(name, "download")
+    code, stdout, error = android.device_adb(settings, "pull", path, str(output), timeout=600)
+    if code or not output.is_file() or output.stat().st_size <= 0:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise ValueError(error or stdout or "设备文件 Pull 失败")
+    return _download_response(output, name)
+
+
 def _pull_file(settings: dict, path: str, item: dict) -> dict:
     folder = _download_folder(str(settings.get("_selected_adb_serial", "")))
     output = folder / item["name"]

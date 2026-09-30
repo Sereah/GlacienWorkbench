@@ -7,6 +7,7 @@
   "audio_sample_rate": 48000,
   "audio_channels": 2,
   "process_package_keywords": [],
+  "watched_packages": [],
   "log_filters": {},
   "apk_sources": {},
   "app_launches": {},

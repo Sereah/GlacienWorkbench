@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from codes.app import android
@@ -54,6 +55,40 @@ pair _adb-tls-pairing._tcp 192.168.1.21:37124
             result = android.disconnect_wireless({}, {"ip": "192.168.1.20", "port": 5555})
         self.assertEqual("192.168.1.20:5555", result["serial"])
         adb_call.assert_called_once_with({}, "disconnect", "192.168.1.20:5555", timeout=8)
+
+    def test_pairing_status_separates_pair_and_connect_services(self):
+        output = """List of discovered mdns services
+pixel-pair _adb-tls-pairing._tcp 192.168.1.20:37124
+pixel-connect _adb-tls-connect._tcp 192.168.1.20:37123
+"""
+        with patch.object(android, "tool", return_value="/sdk/adb"), patch.object(
+            android, "adb", side_effect=[(0, "pair HOST[:PORT] [PAIRING CODE]", ""), (0, output, "")]
+        ):
+            result = android.wireless_pairing_status({})
+
+        self.assertTrue(result["supported"])
+        self.assertEqual("192.168.1.20:37124", result["pairing_services"][0]["endpoint"])
+        self.assertEqual("192.168.1.20:37123", result["connect_services"][0]["endpoint"])
+
+    def test_pairing_code_uses_stdin_instead_of_command_argument(self):
+        completed = SimpleNamespace(returncode=0, stdout="Successfully paired to 192.168.1.20:37124", stderr="")
+        with patch.object(android, "tool", return_value="/sdk/adb"), patch.object(
+            android.proc, "run", return_value=completed
+        ) as run_call, patch.object(
+            android, "wireless_pairing_status", return_value={"connect_services": []}
+        ):
+            result = android.pair_wireless({}, {"ip": "192.168.1.20", "port": 37124, "pairing_code": "123456"})
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(["/sdk/adb", "pair", "192.168.1.20:37124"], run_call.call_args.args[0])
+        self.assertEqual("123456\n", run_call.call_args.kwargs["input"])
+        self.assertNotIn("123456", run_call.call_args.args[0])
+
+    def test_pairing_rejects_invalid_code_before_running_adb(self):
+        with patch.object(android.proc, "run") as run_call:
+            with self.assertRaisesRegex(ValueError, "六位"):
+                android.pair_wireless({}, {"ip": "192.168.1.20", "port": 37124, "pairing_code": "12ab"})
+        run_call.assert_not_called()
 
 
 if __name__ == "__main__":
