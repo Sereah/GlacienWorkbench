@@ -16,6 +16,7 @@ Glacien 不再使用 `settings.<方案名>.json` 或 `active_settings.json`。�
 ```text
 GlacienWorkbench/
 ├── app/config.json
+├── downloads/
 ├── local-tools/
 │   ├── offline-logs/config.json
 │   └── audio-processing/
@@ -47,8 +48,7 @@ GlacienWorkbench/
 │       ├── config.json
 │       ├── screenshots/
 │       ├── recordings/
-│       ├── recording-covers/
-│       └── downloads/
+│       └── recording-covers/
 └── runtime/
     ├── migration-backups/
     ├── themes.json
@@ -56,6 +56,8 @@ GlacienWorkbench/
 ```
 
 `app/config.json` 只保存端口，`adb-tools/adb/config.json` 保存 SDK 路径，`adb-tools/device-tools/config.json` 保存可选的 scrcpy 自定义可执行文件路径，`local-tools/audio-processing/config.json` 保存 FFmpeg 路径和最近使用的 PCM 参数；这些配置都包含 schema version。`runtime/themes.json` 保存当前主题 ID 和用户导入的主题，内置主题仍位于只读程序资源 `web/themes.json`，因此重启和升级都不会丢失用户选择。其余字段按功能域由 `app/storage.py` 原子写入。`app/config.py` 为现有业务 API 提供合并视图，但不能恢复单一大 settings 文件。
+
+`downloads/` 是设备文件 Pull、批量 Pull 和应用 APK Pull 共用的短期中转缓存，与 `app/`、`runtime/` 同级，不属于某一个页面的持久资产。完整下载后自动清理；旧版 `adb-tools/device-tools/downloads/` 在启动时迁移到该目录。
 
 `storage.STORAGE_DOMAINS` 是目录和默认配置的唯一注册表。每次启动都会创建已注册的数据目录；具有配置文件的功能会为缺失 JSON 写入默认值，只有受管文件目录的功能则只创建目录。已存在文件绝不覆盖。因此后续新增功能只需注册配置路径、默认值和数据目录，旧安装也能自动补齐。历史迁移仍由 `.storage-v2` 标记限制为一次，不影响当前结构补齐。
 

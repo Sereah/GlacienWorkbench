@@ -43,6 +43,8 @@ def existing_glacien_url(port):
 
 def bind_server():
     """绑定配置端口；若已有 Glacien，则返回其 URL 供窗口复用。"""
+    device_files.migrate_legacy_download_cache()
+    device_files.cleanup_stale_downloads()
     port=int(config.load().get("port",8765));url=f"http://127.0.0.1:{port}"
     try:
         return Server(("127.0.0.1",port),Handler),url
@@ -58,25 +60,34 @@ class Handler(BaseHTTPRequestHandler):
     def reply(self,data,status=200):
         body=json.dumps(data,ensure_ascii=False).encode();self.send_response(status);self.send_header("Content-Type","application/json; charset=utf-8");self.send_header("Content-Length",str(len(body)));self.end_headers();self.wfile.write(body)
     def body(self): return json.loads(self.rfile.read(int(self.headers.get("Content-Length","0"))) or b"{}")
-    def file_reply(self,path,download_name=None):
+    def file_reply(self,path,download_name=None,on_complete=None):
         size=path.stat().st_size;start,end=0,size-1;status=200;header=self.headers.get("Range","")
         if header:
             match=re.fullmatch(r"bytes=(\d*)-(\d*)",header.strip())
-            if not match: return self.reply({"error":"无效的 Range"},416)
+            if not match:
+                if on_complete:on_complete(False)
+                return self.reply({"error":"无效的 Range"},416)
             if match.group(1): start=int(match.group(1));end=int(match.group(2)) if match.group(2) else end
             elif match.group(2): start=max(0,size-int(match.group(2)))
-            if start>min(end,size-1): return self.reply({"error":"Range 超出文件范围"},416)
+            if start>min(end,size-1):
+                if on_complete:on_complete(False)
+                return self.reply({"error":"Range 超出文件范围"},416)
             end=min(end,size-1);status=206
         length=end-start+1;self.send_response(status);self.send_header("Content-Type",mimetypes.guess_type(path.name)[0] or "application/octet-stream");self.send_header("Cache-Control","no-store");self.send_header("Accept-Ranges","bytes");self.send_header("Content-Length",str(length));
         if download_name:self.send_header("Content-Disposition",download_disposition(download_name))
         if status==206:self.send_header("Content-Range",f"bytes {start}-{end}/{size}")
         self.end_headers();
-        with path.open("rb") as stream:
-            stream.seek(start);remaining=length
-            while remaining:
-                block=stream.read(min(1024*1024,remaining))
-                if not block:break
-                self.wfile.write(block);remaining-=len(block)
+        completed=False
+        try:
+            with path.open("rb") as stream:
+                stream.seek(start);remaining=length
+                while remaining:
+                    block=stream.read(min(1024*1024,remaining))
+                    if not block:break
+                    self.wfile.write(block);remaining-=len(block)
+                completed=remaining==0 and status==200
+        finally:
+            if on_complete:on_complete(completed)
     def multipart(self):
         """解析浏览器上传的单个资源文件。"""
         import cgi
@@ -130,7 +141,10 @@ class Handler(BaseHTTPRequestHandler):
             if route=="/api/captures/files": return self.reply(captures.files(q.get("kind",["all"])[0],q.get("offset",[0])[0],q.get("limit",[50])[0]))
             if route=="/api/captures/file": return self.file_reply(captures.resolve_file(q.get("id",[""])[0]))
             if route=="/api/device-files/list": return self.reply(device_files.list_directory(android.selected_device_settings(settings,q.get("serial",[""])[0]),q.get("path",["/sdcard"])[0]))
-            if route=="/api/device-files/download": return self.file_reply(device_files.resolve_download(q.get("id",[""])[0]))
+            if route=="/api/device-files/download":
+                path=device_files.begin_download(q.get("id",[""])[0])
+                return self.file_reply(path,path.name,lambda completed:device_files.finish_download(path,completed))
+            if route=="/api/device-files/cache": return self.reply(device_files.download_cache_status())
             if route=="/api/bugreports/status": return self.reply(bugreports.status())
             if route=="/api/bugreports/files": return self.reply(bugreports.files())
             if route=="/api/bugreports/download":
@@ -160,7 +174,7 @@ class Handler(BaseHTTPRequestHandler):
             # 先拒绝空/未知日志规则，避免未连接设备时掩盖“全部日志”绕过问题。
             if route=="/api/logs/export": device.saved_log_filter(settings, body.get("preset", ""))
             selected=android.selected_device_settings(settings,body.get("serial","")) if route in {"/api/install","/api/apks/push","/api/resources/push","/api/processes/stop","/api/processes/launch","/api/processes/uninstall","/api/processes/cert-sha256","/api/apps/launch","/api/apps/stop","/api/apps/clear","/api/apps/enabled","/api/apps/uninstall","/api/apps/pull-apk","/api/bugreports/start","/api/broadcasts/send","/api/adb-commands/run","/api/logs/export","/api/logs/clear","/api/device-logs/scan","/api/device-logs/pull","/api/captures/screenshot","/api/captures/record/start","/api/captures/scrcpy/launch","/api/device-files/pull","/api/device-files/pull-batch","/api/device-files/delete","/api/device-files/delete-batch","/api/device-files/create-directory","/api/device-files/create-file","/api/device-files/preview","/api/adb/root","/api/adb/remount","/api/adb/reboot"} else settings
-            actions={"/api/install":lambda:artifacts.install(selected,body),"/api/apks/md5":lambda:artifacts.checksum(settings,body),"/api/apks/delete":lambda:artifacts.delete(settings,body),"/api/apks/sign":lambda:artifacts.sign(settings,body),"/api/resources/md5":lambda:artifacts.resource_checksum(settings,body),"/api/resources/delete":lambda:artifacts.delete_resource(settings,body),"/api/resources/push":lambda:artifacts.push(selected,body),"/api/processes/stop":lambda:device.stop(selected,body.get("package","")),"/api/processes/launch":lambda:device.launch(selected,body.get("package",""))}
+            actions={"/api/install":lambda:artifacts.install(selected,body),"/api/apks/md5":lambda:artifacts.checksum(settings,body),"/api/apks/delete":lambda:artifacts.delete(settings,body),"/api/apks/rename":lambda:artifacts.rename_apk(settings,body),"/api/apks/sign":lambda:artifacts.sign(settings,body),"/api/resources/md5":lambda:artifacts.resource_checksum(settings,body),"/api/resources/delete":lambda:artifacts.delete_resource(settings,body),"/api/resources/rename":lambda:artifacts.rename_resource(settings,body),"/api/resources/push":lambda:artifacts.push(selected,body),"/api/processes/stop":lambda:device.stop(selected,body.get("package","")),"/api/processes/launch":lambda:device.launch(selected,body.get("package",""))}
             actions["/api/apks/collect"] = lambda: artifacts.collect_apks(settings, body)
             actions["/api/apks/sha256"] = lambda: artifacts.sha256_checksum(settings, body)
             actions["/api/apks/cert-sha256"] = lambda: artifacts.certificate_checksum(settings, body)
@@ -218,6 +232,7 @@ class Handler(BaseHTTPRequestHandler):
             actions["/api/device-files/create-directory"] = lambda: device_files.create_directory(selected, body.get("directory", ""), body.get("name", ""))
             actions["/api/device-files/create-file"] = lambda: device_files.create_text_file(selected, body.get("directory", ""), body.get("name", ""), body.get("content", ""), body.get("overwrite"))
             actions["/api/device-files/preview"] = lambda: device_files.preview(selected, body.get("path", ""))
+            actions["/api/device-files/cache/clear"] = lambda: device_files.clear_download_cache(body.get("confirmed"))
             actions["/api/config/import"] = lambda: config.import_shared(body)
             actions["/api/config/domain"] = lambda: config.update_domain(body.get("domain", ""), body.get("values"))
             actions["/api/themes/import"] = lambda: themes.import_theme(body)

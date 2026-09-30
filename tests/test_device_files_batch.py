@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import unittest
 import tempfile
 from pathlib import Path
@@ -9,6 +10,10 @@ from codes.app import device_files
 
 
 class DeviceFilesBatchTest(unittest.TestCase):
+    def tearDown(self):
+        device_files._ACTIVE_DOWNLOADS.clear()
+        device_files._ACTIVE_STAGING_DIRECTORIES.clear()
+
     def test_pull_known_file_uses_download_staging(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(device_files, "DOWNLOAD_ROOT", Path(folder)):
             def adb_call(_settings, *args, **_kwargs):
@@ -21,6 +26,124 @@ class DeviceFilesBatchTest(unittest.TestCase):
         self.assertEqual("com.example.apk", result["name"])
         self.assertTrue(result["url"].startswith("/api/device-files/download?id="))
         self.assertEqual(("pull", "/data/app/base.apk"), adb.call_args.args[1:3])
+
+    def test_download_cache_status_counts_nested_files(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(device_files, "DOWNLOAD_ROOT", Path(folder)):
+            nested = Path(folder) / "SERIAL" / "timestamp"
+            nested.mkdir(parents=True)
+            (nested / "one.apk").write_bytes(b"1234")
+            (nested / "two.zip").write_bytes(b"12")
+
+            status = device_files.download_cache_status()
+
+        self.assertEqual(2, status["files"])
+        self.assertEqual(6, status["bytes"])
+
+    def test_download_cache_is_registered_at_data_root(self):
+        definition = device_files.storage.STORAGE_DOMAINS["device_files"]
+
+        self.assertEqual(".", definition["root"])
+        self.assertEqual(("downloads",), definition["directories"])
+
+    def test_legacy_download_cache_migrates_without_overwriting_conflicts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            legacy = root / "adb-tools" / "device-tools" / "downloads"
+            current = root / "downloads"
+            (legacy / "SERIAL" / "old").mkdir(parents=True)
+            (legacy / "SERIAL" / "conflict").mkdir(parents=True)
+            (current / "SERIAL" / "conflict").mkdir(parents=True)
+            (legacy / "SERIAL" / "old" / "app.apk").write_bytes(b"old")
+            (legacy / "SERIAL" / "conflict" / "app.apk").write_bytes(b"legacy")
+            (current / "SERIAL" / "conflict" / "app.apk").write_bytes(b"current")
+
+            with patch.object(device_files, "LEGACY_DOWNLOAD_ROOT", legacy), patch.object(device_files, "DOWNLOAD_ROOT", current):
+                result = device_files.migrate_legacy_download_cache()
+
+            self.assertEqual({"migrated": 1, "skipped": 1}, result)
+            self.assertEqual(b"old", (current / "SERIAL" / "old" / "app.apk").read_bytes())
+            self.assertEqual(b"current", (current / "SERIAL" / "conflict" / "app.apk").read_bytes())
+            self.assertEqual(b"legacy", (legacy / "SERIAL" / "conflict" / "app.apk").read_bytes())
+
+    def test_clear_download_cache_skips_active_transfer(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(device_files, "DOWNLOAD_ROOT", Path(folder)):
+            nested = Path(folder) / "SERIAL" / "timestamp"
+            nested.mkdir(parents=True)
+            active = nested / "active.apk"
+            stale = nested / "stale.apk"
+            active.write_bytes(b"active")
+            stale.write_bytes(b"stale")
+            opened = device_files.begin_download("SERIAL/timestamp/active.apk")
+
+            result = device_files.clear_download_cache(True)
+
+            self.assertTrue(active.exists())
+            self.assertFalse(stale.exists())
+            self.assertEqual(1, result["deleted"])
+            device_files.finish_download(opened, False)
+
+    def test_clear_download_cache_skips_active_pull_staging(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(device_files, "DOWNLOAD_ROOT", Path(folder)):
+            staging = device_files._download_folder("SERIAL")
+            item = staging / "pulling.apk"
+            item.write_bytes(b"partial")
+
+            result = device_files.clear_download_cache(True)
+
+            self.assertEqual(0, result["deleted"])
+            self.assertTrue(item.exists())
+
+    def test_clear_download_cache_requires_confirmation(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(device_files, "DOWNLOAD_ROOT", Path(folder)):
+            item = Path(folder) / "cached.apk"
+            item.write_bytes(b"apk")
+
+            result = device_files.clear_download_cache(False)
+
+            self.assertTrue(result["requires_confirmation"])
+            self.assertTrue(item.exists())
+
+    def test_completed_download_removes_staging_file_and_empty_directories(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(device_files, "DOWNLOAD_ROOT", Path(folder)):
+            nested = Path(folder) / "SERIAL" / "timestamp"
+            nested.mkdir(parents=True)
+            item = nested / "app.apk"
+            item.write_bytes(b"apk")
+            opened = device_files.begin_download("SERIAL/timestamp/app.apk")
+
+            device_files.finish_download(opened, True)
+
+            self.assertFalse(item.exists())
+            self.assertFalse(nested.exists())
+
+    def test_interrupted_download_keeps_staging_file_for_retry(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(device_files, "DOWNLOAD_ROOT", Path(folder)):
+            nested = Path(folder) / "SERIAL" / "timestamp"
+            nested.mkdir(parents=True)
+            item = nested / "app.apk"
+            item.write_bytes(b"apk")
+            opened = device_files.begin_download("SERIAL/timestamp/app.apk")
+
+            device_files.finish_download(opened, False)
+
+            self.assertTrue(item.exists())
+            self.assertEqual(0, device_files.download_cache_status()["active"])
+
+    def test_stale_cleanup_preserves_recent_files(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(device_files, "DOWNLOAD_ROOT", Path(folder)):
+            nested = Path(folder) / "SERIAL" / "timestamp"
+            nested.mkdir(parents=True)
+            old = nested / "old.apk"
+            recent = nested / "recent.apk"
+            old.write_bytes(b"old")
+            recent.write_bytes(b"recent")
+            os.utime(old, (100, 100))
+
+            result = device_files.cleanup_stale_downloads(max_age_seconds=100, now=1000)
+
+            self.assertEqual(1, result["deleted"])
+            self.assertFalse(old.exists())
+            self.assertTrue(recent.exists())
 
     def test_batch_entries_require_same_parent_and_unique_paths(self):
         with self.assertRaisesRegex(ValueError, "至少选择"):

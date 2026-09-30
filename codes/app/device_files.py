@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import re
 import shutil
+import threading
+import time
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 
@@ -10,6 +12,7 @@ from . import android
 from . import storage
 
 DOWNLOAD_ROOT = storage.data_dir("device_files", "downloads")
+LEGACY_DOWNLOAD_ROOT = storage.ROOT / "adb-tools" / "device-tools" / "downloads"
 SAFE_FILE_NAME = re.compile(r"[^/\\\x00\r\n]{1,255}")
 SAFE_DOWNLOAD_ID = re.compile(r"[A-Za-z0-9._/-]+")
 MAX_ENTRIES = 300
@@ -17,7 +20,11 @@ MAX_BATCH_ENTRIES = 300
 MAX_UPLOAD_SIZE = 2 * 1024 * 1024 * 1024
 MAX_TEXT_FILE_SIZE = 1024 * 1024
 PREVIEW_BYTES = 256 * 1024
+DOWNLOAD_RETENTION_SECONDS = 24 * 60 * 60
 STAT_SEPARATOR = "\x1f"
+_DOWNLOAD_LOCK = threading.RLock()
+_ACTIVE_DOWNLOADS: set[Path] = set()
+_ACTIVE_STAGING_DIRECTORIES: set[Path] = set()
 
 
 def device_path(value: object, *, allow_root: bool = True) -> str:
@@ -159,14 +166,113 @@ def _safe_slug(value: str, fallback: str = "folder") -> str:
     return slug or fallback
 
 
+def _cache_files() -> list[Path]:
+    if not DOWNLOAD_ROOT.is_dir():
+        return []
+    return [item for item in DOWNLOAD_ROOT.rglob("*") if item.is_symlink() or item.is_file()]
+
+
+def migrate_legacy_download_cache() -> dict:
+    """将旧版 device-tools/downloads 中转缓存迁到根级 downloads，不覆盖冲突文件。"""
+    if LEGACY_DOWNLOAD_ROOT == DOWNLOAD_ROOT or not LEGACY_DOWNLOAD_ROOT.is_dir():
+        return {"migrated":0,"skipped":0}
+    migrated=0;skipped=0
+    for item in LEGACY_DOWNLOAD_ROOT.rglob("*"):
+        if not item.is_file() or item.is_symlink(): continue
+        if storage.migrate_file(item,DOWNLOAD_ROOT/item.relative_to(LEGACY_DOWNLOAD_ROOT)): migrated+=1
+        else: skipped+=1
+    directories=[LEGACY_DOWNLOAD_ROOT,*[item for item in LEGACY_DOWNLOAD_ROOT.rglob("*") if item.is_dir() and not item.is_symlink()]]
+    for item in sorted(directories,key=lambda path:len(path.parts),reverse=True):
+        try: item.rmdir()
+        except OSError: continue
+    return {"migrated":migrated,"skipped":skipped}
+
+
+def _prune_empty_cache_directories() -> None:
+    if not DOWNLOAD_ROOT.is_dir():
+        return
+    directories = [item for item in DOWNLOAD_ROOT.rglob("*") if item.is_dir() and not item.is_symlink()]
+    for item in sorted(directories, key=lambda path: len(path.parts), reverse=True):
+        try:
+            item.rmdir()
+        except OSError:
+            continue
+
+
+def _release_staging_directory(folder: Path) -> None:
+    with _DOWNLOAD_LOCK:
+        _ACTIVE_STAGING_DIRECTORIES.discard(folder.resolve())
+
+
+def download_cache_status() -> dict:
+    """返回设备 Pull 中转缓存大小，不暴露本机文件路径。"""
+    with _DOWNLOAD_LOCK:
+        files = _cache_files();size=0
+        for item in files:
+            try: size+=item.lstat().st_size
+            except OSError: continue
+        return {"files":len(files),"bytes":size,"active":len(_ACTIVE_DOWNLOADS)+len(_ACTIVE_STAGING_DIRECTORIES)}
+
+
+def clear_download_cache(confirmed: object = False) -> dict:
+    """清理非下载中的中转文件；用户最终选择的保存位置不在此目录。"""
+    if not confirmed:
+        return {"requires_confirmation":True}
+    with _DOWNLOAD_LOCK:
+        deleted=0;released=0
+        for item in _cache_files():
+            try: resolved=item.resolve()
+            except OSError: resolved=item
+            if resolved in _ACTIVE_DOWNLOADS or any(directory==resolved or directory in resolved.parents for directory in _ACTIVE_STAGING_DIRECTORIES): continue
+            try:
+                size=item.lstat().st_size;item.unlink();deleted+=1;released+=size
+            except FileNotFoundError: continue
+        _prune_empty_cache_directories()
+        return {"requires_confirmation":False,"deleted":deleted,"released_bytes":released,"status":download_cache_status()}
+
+
+def cleanup_stale_downloads(max_age_seconds: int = DOWNLOAD_RETENTION_SECONDS, now: float | None = None) -> dict:
+    """回收超期中转文件；活动下载始终跳过。"""
+    cutoff=(time.time() if now is None else now)-max(0,int(max_age_seconds))
+    with _DOWNLOAD_LOCK:
+        deleted=0;released=0
+        for item in _cache_files():
+            try: resolved=item.resolve();stat=item.lstat()
+            except OSError: continue
+            if resolved in _ACTIVE_DOWNLOADS or any(directory==resolved or directory in resolved.parents for directory in _ACTIVE_STAGING_DIRECTORIES) or stat.st_mtime>=cutoff: continue
+            try: item.unlink();deleted+=1;released+=stat.st_size
+            except FileNotFoundError: continue
+        _prune_empty_cache_directories()
+        return {"deleted":deleted,"released_bytes":released}
+
+
+def begin_download(value: object) -> Path:
+    """解析并标记正在传输的缓存文件，避免手动或过期清理误删。"""
+    with _DOWNLOAD_LOCK:
+        path=resolve_download(value);_ACTIVE_DOWNLOADS.add(path.resolve());return path
+
+
+def finish_download(path: Path, completed: bool) -> None:
+    """完整下载后消费中转文件；Range 或中断请求保留给后续重试。"""
+    with _DOWNLOAD_LOCK:
+        resolved=path.resolve();_ACTIVE_DOWNLOADS.discard(resolved)
+        if completed:
+            try: path.unlink()
+            except FileNotFoundError: pass
+            _prune_empty_cache_directories()
+
+
 def _download_folder(serial: str) -> Path:
+    cleanup_stale_downloads()
     serial_part = re.sub(r"[^A-Za-z0-9._-]+", "_", serial).strip("_.") or "device"
     folder = DOWNLOAD_ROOT / serial_part / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     folder.mkdir(parents=True, exist_ok=False)
+    with _DOWNLOAD_LOCK: _ACTIVE_STAGING_DIRECTORIES.add(folder.resolve())
     return folder
 
 
 def _download_response(output: Path, name: str) -> dict:
+    _release_staging_directory(output.parent)
     identifier = output.relative_to(DOWNLOAD_ROOT).as_posix()
     return {"ok": True, "name": name, "size": output.stat().st_size, "id": identifier, "url": "/api/device-files/download?id=" + identifier}
 
@@ -182,6 +288,7 @@ def pull_known_file(settings: dict, remote_path: object, download_name: object) 
     output = folder / _safe_slug(name, "download")
     code, stdout, error = android.device_adb(settings, "pull", path, str(output), timeout=600)
     if code or not output.is_file() or output.stat().st_size <= 0:
+        _release_staging_directory(folder)
         shutil.rmtree(folder, ignore_errors=True)
         raise ValueError(error or stdout or "设备文件 Pull 失败")
     return _download_response(output, name)
@@ -192,6 +299,7 @@ def _pull_file(settings: dict, path: str, item: dict) -> dict:
     output = folder / item["name"]
     code, stdout, error = android.device_adb(settings, "pull", path, str(output), timeout=600)
     if code or not output.is_file():
+        _release_staging_directory(folder)
         shutil.rmtree(folder, ignore_errors=True)
         raise ValueError(error or stdout or "设备文件 Pull 失败")
     return _download_response(output, output.name)
@@ -205,6 +313,7 @@ def _pull_directory(settings: dict, path: str, item: dict) -> dict:
     code, stdout, error = android.device_adb(settings, "pull", path, str(staging), timeout=1800)
     pulled = staging / item["name"]
     if code or not pulled.is_dir():
+        _release_staging_directory(folder)
         shutil.rmtree(folder, ignore_errors=True)
         raise ValueError(error or stdout or "设备文件夹 Pull 失败")
     slug = _safe_slug(item["name"])
@@ -212,6 +321,7 @@ def _pull_directory(settings: dict, path: str, item: dict) -> dict:
     try:
         archive = Path(shutil.make_archive(str(archive_base), "zip", root_dir=str(staging), base_dir=item["name"]))
     except OSError as exception:
+        _release_staging_directory(folder)
         shutil.rmtree(folder, ignore_errors=True)
         raise ValueError("设备文件夹打包失败：" + str(exception))
     # 仅保留 zip，删除已展开的原始目录，避免下载目录冗余占用。
@@ -240,6 +350,7 @@ def pull_batch(settings: dict, values: object) -> dict:
         archive_name = "device-files-" + datetime.now().strftime("%Y%m%d-%H%M%S")
         archive = Path(shutil.make_archive(str(folder / archive_name), "zip", root_dir=str(staging)))
     except (OSError, ValueError) as error:
+        _release_staging_directory(folder)
         shutil.rmtree(folder, ignore_errors=True)
         if isinstance(error, ValueError):
             raise
@@ -279,12 +390,14 @@ def upload(settings: dict, directory_value: object, filename_value: object, cont
             raise ValueError(error or stdout or "创建设备目录失败")
     temporary = DOWNLOAD_ROOT / "uploads" / (datetime.now().strftime("%Y%m%d_%H%M%S_%f") + "_" + filename)
     temporary.parent.mkdir(parents=True, exist_ok=True)
+    with _DOWNLOAD_LOCK: _ACTIVE_DOWNLOADS.add(temporary.resolve())
     try:
         temporary.write_bytes(content)
         code, stdout, error = android.device_adb(settings, "push", str(temporary), remote, timeout=600)
         if code:
             raise ValueError(error or stdout or "设备文件 Push 失败")
     finally:
+        with _DOWNLOAD_LOCK: _ACTIVE_DOWNLOADS.discard(temporary.resolve())
         temporary.unlink(missing_ok=True)
     return {"ok": True, "requires_confirmation": False, "name": filename, "remote_path": remote}
 

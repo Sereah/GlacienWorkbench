@@ -27,7 +27,7 @@
 | `commands` | 自定义命令与分类 |
 | `captures` | 截图、录屏和 scrcpy 配置 |
 | `themes` | 用户导入主题 |
-| `device_files` | Device Explorer 下载文件 |
+| `device_files` | 设备文件与应用 APK Pull 共用的根级 `downloads/` 中转缓存 |
 | `bugreports` | 完整系统 Bugreport 诊断包与任务临时目录 |
 | `runtime` | WebEngine Profile 与迁移备份 |
 

@@ -29,7 +29,7 @@ STORAGE_DOMAINS = {
     "device_logs": {"config": "adb-tools/device-logs/sources.json", "default": {"storage_key": "device_logs", "schema_version": 1, "device_log_sources": {}}, "directories": ()},
     "commands": {"config": "adb-tools/commands/commands.json", "default": {"storage_key": "commands", "schema_version": 2, "categories": [], "commands": {}}, "directories": ()},
     "captures": {"config": "adb-tools/device-tools/config.json", "default": {"storage_key": "captures", "schema_version": 1, "scrcpy_path": ""}, "directories": ("screenshots", "recordings", "recording-covers")},
-    "device_files": {"config": None, "root": "adb-tools/device-tools", "directories": ("downloads",)},
+    "device_files": {"config": None, "root": ".", "directories": ("downloads",)},
     "bugreports": {"config": None, "root": "adb-tools/bugreports", "directories": ("files", "runtime")},
     "offline_logs": {"config": "local-tools/offline-logs/config.json", "default": {"storage_key": "offline_logs", "schema_version": 2, "offline_filter_presets": {}, "offline_log_sources": {}}, "directories": ()},
     "audio_processing": {"config": "local-tools/audio-processing/config.json", "default": {"storage_key": "audio_processing", "schema_version": 1, "ffmpeg_path": "", "sample_format": "s16le", "sample_rate": 48000, "channels": 2}, "directories": ("inputs", "previews")},

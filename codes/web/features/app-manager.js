@@ -223,6 +223,7 @@ async function runApplicationAction(action, packageName, enabled, button) {
       link.href = result.url;
       link.download = result.name;
       link.click();
+      if(typeof scheduleDownloadCacheStatusRefresh==='function')scheduleDownloadCacheStatusRefresh();
       toast(`APK 已 Pull，正在选择保存位置：${result.name}`);
     } else {
       toast(result.output || '操作完成', !result.ok);

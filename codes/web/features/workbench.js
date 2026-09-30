@@ -147,6 +147,25 @@ function selectAdbOperationTab(tab){
 }
 function deviceFilePath(){return $('#deviceFilePath')?.value.trim()||state.deviceFiles.path||'/sdcard'}
 function deviceFileRequest(path=deviceFilePath()){return apiPathWithSerial(`/api/device-files/list?path=${encodeURIComponent(path)}`)}
+function renderDownloadCacheStatus(status){
+  const target=$('#downloadCacheStatus'),button=$('#downloadCacheClear');if(!target||!button)return;
+  const files=Number(status?.files||0),bytes=Number(status?.bytes||0),active=Number(status?.active||0);
+  target.textContent=`下载中转缓存：${formatSize(bytes)} · ${files} 个文件${active?` · ${active} 个正在下载`:''}`;button.disabled=!files;
+}
+async function refreshDownloadCacheStatus(){
+  try{renderDownloadCacheStatus(await api('/api/device-files/cache'));}
+  catch(error){const target=$('#downloadCacheStatus');if(target)target.textContent='中转缓存读取失败：'+error.message;}
+}
+function scheduleDownloadCacheStatusRefresh(){for(const delay of [0,1500,5000])setTimeout(refreshDownloadCacheStatus,delay);}
+async function clearDownloadCache(){
+  const button=$('#downloadCacheClear');button.disabled=true;button.textContent='检查中…';
+  try{
+    const status=await api('/api/device-files/cache');
+    if(!status.files){renderDownloadCacheStatus(status);return toast('中转缓存已经为空');}
+    if(!confirm(`确认清理设备文件下载缓存？\n\n将删除 ${status.files} 个中转文件，共 ${formatSize(status.bytes)}。\n不会删除你通过保存对话框保存到其他位置的文件。`))return;
+    button.textContent='清理中…';const result=await api('/api/device-files/cache/clear',{method:'POST',body:JSON.stringify({confirmed:true})});renderDownloadCacheStatus(result.status);toast(`已清理 ${result.deleted} 个中转文件，释放 ${formatSize(result.released_bytes)}`);
+  }catch(error){toast(error.message,true)}finally{button.textContent='清除中转缓存';await refreshDownloadCacheStatus();}
+}
 function deviceFileBreadcrumbs(path){
   const root=$('#deviceFileBreadcrumbs');if(!root)return;const parts=path.split('/').filter(Boolean),items=[`<button type="button" class="device-file-root" onclick="loadDeviceFiles('/')">设备根目录 /</button>`];let current='';
   for(const part of parts){current+='/'+part;items.push(`<span>/</span><button type="button" data-path="${escapeHtml(current)}" onclick="loadDeviceFiles(this.dataset.path)">${escapeHtml(part)}</button>`)}
@@ -174,11 +193,11 @@ async function loadDeviceFiles(path=deviceFilePath()){
 function openDeviceFileParent(){if(state.deviceFiles.parent)loadDeviceFiles(state.deviceFiles.parent)}
 async function pullDeviceFile(index,button){
   const item=state.deviceFiles.entries[index];if(!item)return;const directory=item.type==='directory';button.disabled=true;button.textContent='Pull 中…';
-  try{const result=await api('/api/device-files/pull',{method:'POST',body:JSON.stringify(withAdbSerial({path:item.path}))});const link=document.createElement('a');link.href=result.url;link.download=result.name;document.body.append(link);link.click();link.remove();toast(`已 Pull ${result.name}（${formatSize(result.size)}）`+(directory?'，文件夹已打包为 zip':''))}catch(error){toast(error.message,true)}finally{button.disabled=false;button.textContent=directory?'Pull (zip)':'Pull'}
+  try{const result=await api('/api/device-files/pull',{method:'POST',body:JSON.stringify(withAdbSerial({path:item.path}))});const link=document.createElement('a');link.href=result.url;link.download=result.name;document.body.append(link);link.click();link.remove();scheduleDownloadCacheStatusRefresh();toast(`已 Pull ${result.name}（${formatSize(result.size)}）`+(directory?'，文件夹已打包为 zip':''))}catch(error){toast(error.message,true)}finally{button.disabled=false;button.textContent=directory?'Pull (zip)':'Pull'}
 }
 async function pullSelectedDeviceFiles(){
   const items=selectedDeviceFileItems(),button=$('#deviceFileBatchPullButton');if(!items.length)return;button.disabled=true;button.textContent='批量 Pull 中…';
-  try{const result=await api('/api/device-files/pull-batch',{method:'POST',body:JSON.stringify(withAdbSerial({paths:items.map(item=>item.path)}))});const link=document.createElement('a');link.href=result.url;link.download=result.name;document.body.append(link);link.click();link.remove();toast(`已 Pull ${result.count} 项并打包为 ${result.name}（${formatSize(result.size)}）`)}catch(error){toast(error.message,true)}finally{button.textContent='批量 Pull';updateDeviceFileSelection()}
+  try{const result=await api('/api/device-files/pull-batch',{method:'POST',body:JSON.stringify(withAdbSerial({paths:items.map(item=>item.path)}))});const link=document.createElement('a');link.href=result.url;link.download=result.name;document.body.append(link);link.click();link.remove();scheduleDownloadCacheStatusRefresh();toast(`已 Pull ${result.count} 项并打包为 ${result.name}（${formatSize(result.size)}）`)}catch(error){toast(error.message,true)}finally{button.textContent='批量 Pull';updateDeviceFileSelection()}
 }
 async function deleteDeviceFile(index){
   const item=state.deviceFiles.entries[index];if(!item)return;const directory=item.type==='directory';const message=directory?`确认递归删除设备文件夹及其全部内容？\n\n${item.path}\n\n目录下所有文件都会被删除，且不可恢复。`:`确认删除设备文件？\n\n${item.path}\n\n此操作不可恢复。`;if(!confirm(message))return;
@@ -394,6 +413,7 @@ function openFeatureModal(kind, title, content, options={}){
   return modal;
 }
 function closeFeatureConfig(){
+  if(state.featureConfigKind==='artifact-rename')state.artifactRename=null;
   $('#configModal').hidden=true;
   delete $('#configModal').dataset.kind;
   const footer=$('#configModal .config-dialog-footer');footer.hidden=false;footer.innerHTML=defaultFeatureModalFooter();
@@ -983,7 +1003,7 @@ async function importSharedConfig(files){
 // 单一 target 模型：资源包各自记忆设备部署路径。
 function renderUserDataPath(){const target=$('#userDataPath');if(target)target.textContent=state.config?._meta?.data_root||'读取中…'}
 function renderSettingsPath(target,value){if(!target)return;target.textContent=value;target.title=value==='读取中…'?'':value;}
-renderSettings=function(){const meta=state.config?._meta||{};renderSettingsPath($('#appConfigPath'),meta.app_config||'读取中…');renderSettingsPath($('#settingsDataRoot'),meta.data_root||'读取中…')}
+renderSettings=function(){const meta=state.config?._meta||{};renderSettingsPath($('#appConfigPath'),meta.app_config||'读取中…');renderSettingsPath($('#settingsDataRoot'),meta.data_root||'读取中…');refreshDownloadCacheStatus()}
 function renderAppVersion(){const target=$('#appVersion'),version=state.config?._meta?.version||'0.4.0';if(target)target.textContent='Glacien Workbench · v'+version}
 function renderReleaseTimeline(){const meta=state.config?._meta||{},current=meta.version||'0.4.0',target=$('#releaseTimeline'),label=$('#currentReleaseVersion');if(label)label.textContent='v'+current;if(!target)return;const releases=Array.isArray(meta.releases)?meta.releases:[];if(!releases.length){target.innerHTML='<p class="release-empty">当前版本 v'+escapeHtml(current)+'，暂无更新记录。</p>';return}const visible=releases.slice(0,3),hasOlder=releases.length>visible.length;target.innerHTML=visible.map(item=>{const version=String(item.version||''),changes=(Array.isArray(item.changes)?item.changes:[]).slice(0,3);return `<article class="release-entry"><div class="release-marker"></div><div class="release-entry-body"><header><div><b>v${escapeHtml(version||current)}</b>${version===current?'<span>当前版本</span>':''}</div><time>${escapeHtml(item.date||'')}</time></header><h3>${escapeHtml(item.title||'版本更新')}</h3><ul>${changes.map(change=>`<li>${escapeHtml(change)}</li>`).join('')}</ul></div></article>`}).join('')+(hasOlder?'<p class="release-older" aria-label="还有更早版本未展示">···<span>更早版本暂不展示</span></p>':'')}
 async function revealUserDataDirectory(){try{const result=await api('/api/system/reveal-data',{method:'POST',body:'{}'});if(result.ok)return toast('已打开用户数据目录：'+result.directory);let copied=false;try{if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(result.directory);copied=true}}catch(error){}toast('系统文件窗口未能打开：'+(result.error||result.directory)+(copied?'（路径已复制）':''),true)}catch(error){toast(error.message,true)}}
@@ -991,9 +1011,41 @@ async function exportAdbCommands(){try{const data=await api('/api/adb-commands/e
 async function importAdbCommands(files){const file=files?.[0];if(!file)return;try{const payload=JSON.parse(await file.text());const result=await api('/api/adb-commands/import',{method:'POST',body:JSON.stringify(payload)});state.config=result.config||await api('/api/config');refreshAdbCommandPresets();renderAdbCommandTree();const renamed=Object.keys(result.renamed||{}).length;toast(`命令导入完成：新增 ${result.added}，跳过相同 ${result.skipped}${renamed?`，重命名冲突 ${renamed}`:''}`)}catch(error){toast('导入命令失败：'+error.message,true)}finally{if($('#adbCommandImport'))$('#adbCommandImport').value=''}}
 function resourceDevicePath(index){return $(`#resource-path-${index}`)?.value.trim()||''}
 async function saveResourcePath(index){const item=state.resources[index],path=resourceDevicePath(index);if(!item)return;if(!path)return toast('请填写设备端绝对目录',true);state.config.resource_device_paths={...(state.config.resource_device_paths||{}),[item.name]:path};try{await api('/api/config',{method:'POST',body:JSON.stringify(state.config)});state.config=await api('/api/config');toast(`已保存 ${item.name} 的部署路径`)}catch(error){toast(error.message,true)}}
-loadResources=async function(){const list=$('#resourceList');list.innerHTML='<div class="artifact-row">正在扫描资源包…</div>';try{state.resources=await api('/api/resources');list.innerHTML=state.resources.length?state.resources.map((item,index)=>`<div class="artifact-row resource-row"><input class="check resource-check" type="checkbox" value="${escapeHtml(item.path)}" data-index="${index}" onchange="updateResourceSelection()"><span class="file-icon">TAR</span><span class="artifact-main"><b>${escapeHtml(item.name)}</b><span>${formatSize(item.size)} · ${new Date(item.modified).toLocaleString()}</span><span class="md5-value" id="resource-md5-${index}">MD5：按“MD5”计算 · 推送前清理：${escapeHtml((item.cleanup_entries||[]).join('、')||'无顶层内容')}</span><label class="resource-path-field"><span>设备部署目录</span><input id="resource-path-${index}" value="${escapeHtml(item.device_path||'')}" placeholder="/sdcard/resources/"></label></span><button class="row-action" onclick="saveResourcePath(${index})">保存路径</button><button class="row-action" onclick="showResourceMd5(${index})">MD5</button><button class="row-action danger-action" onclick="deleteResource(${index})">删除</button></div>`).join(''):'<div class="artifact-row"><span class="artifact-main"><b>没有资源包</b><span>点击右上角“上传资源”添加 .tar.gz 文件。</span></span></div>';updateResourceSelection()}catch(error){list.innerHTML=`<div class="artifact-row">${escapeHtml(error.message)}</div>`}}
+const EMPTY_RESOURCE_LIST='<div class="artifact-row"><span class="artifact-main"><b>没有资源包</b><span>点击右上角“上传资源”添加 .tar.gz 文件。</span></span></div>';
+function reindexResourceRows(){
+  $$('#resourceList .artifact-row[data-index]').forEach((row,index)=>{
+    row.dataset.index=String(index);
+    const checkbox=row.querySelector('.resource-check'),path=row.querySelector('.resource-path-field input'),md5=row.querySelector('.md5-value');
+    if(checkbox)checkbox.dataset.index=String(index);
+    if(path)path.id=`resource-path-${index}`;
+    if(md5)md5.id=`resource-md5-${index}`;
+  });
+}
+loadResources=async function(showLoading=true){
+  const list=$('#resourceList'),selected=new Set(selectedResources()),drafts=new Map($$('#resourceList .resource-row').map(row=>[row.querySelector('.resource-check')?.value,row.querySelector('.resource-path-field input')?.value]).filter(item=>item[0]));
+  if(showLoading)list.innerHTML='<div class="artifact-row">正在扫描资源包…</div>';
+  try{
+    state.resources=await api('/api/resources');
+    list.innerHTML=state.resources.length?state.resources.map((item,index)=>`<div class="artifact-row resource-row" data-index="${index}"><input class="check resource-check" type="checkbox" value="${escapeHtml(item.path)}" data-index="${index}" onchange="updateResourceSelection()"><span class="file-icon">TAR</span><span class="artifact-main"><b data-artifact-name>${escapeHtml(item.name)}</b><span>${formatSize(item.size)} · ${new Date(item.modified).toLocaleString()}</span><span class="md5-value" id="resource-md5-${index}">MD5：按“MD5”计算 · 推送前清理：${escapeHtml((item.cleanup_entries||[]).join('、')||'无顶层内容')}</span><label class="resource-path-field"><span>设备部署目录</span><input id="resource-path-${index}" value="${escapeHtml(drafts.has(item.path)?drafts.get(item.path):item.device_path||'')}" placeholder="/sdcard/resources/"></label></span><button class="row-action" onclick="saveResourcePath(artifactRowIndex(this))">保存路径</button><button class="row-action" onclick="showResourceMd5(artifactRowIndex(this))">MD5</button><button class="row-action" onclick="openArtifactRename('resource',artifactRowIndex(this))">重命名</button><button class="row-action danger-action" onclick="deleteResource(artifactRowIndex(this),this)">删除</button></div>`).join(''):EMPTY_RESOURCE_LIST;
+    $$('.resource-check').forEach(input=>input.checked=selected.has(input.value));updateResourceSelection();return true;
+  }catch(error){if(showLoading)list.innerHTML=`<div class="artifact-row">${escapeHtml(error.message)}</div>`;else toast(`重命名成功，但刷新资源列表失败：${error.message}`,true);return false;}
+}
 showResourceMd5=async function(index){const item=state.resources[index],target=$(`#resource-md5-${index}`);if(!item||!target)return;target.textContent='MD5：计算中…';try{const result=await api('/api/resources/md5',{method:'POST',body:JSON.stringify({file:item.path})});target.textContent=`MD5：${result.md5} · 推送前清理：${(item.cleanup_entries||[]).join('、')||'无顶层内容'}`;await navigator.clipboard?.writeText(result.md5);toast(`MD5 已计算并复制到剪贴板：${item.name}`)}catch(error){target.textContent='MD5：计算失败';toast(error.message,true)}}
-deleteResource=async function(index){const item=state.resources[index];if(!item||!confirm(`确认删除资源包？\n\n${item.name}\n\n此操作不可恢复。`))return;try{await api('/api/resources/delete',{method:'POST',body:JSON.stringify({file:item.path})});if(state.config.resource_device_paths)delete state.config.resource_device_paths[item.name];await api('/api/config',{method:'POST',body:JSON.stringify(state.config)});state.config=await api('/api/config');toast(`已删除 ${item.name}`);loadResources()}catch(error){toast(error.message,true)}}
+deleteResource=async function(index,button){
+  const item=state.resources[index];if(!item||!confirm(`确认删除资源包？\n\n${item.name}\n\n此操作不可恢复。`))return;
+  const row=button?.closest('.artifact-row');if(button)button.disabled=true;
+  try{
+    await api('/api/resources/delete',{method:'POST',body:JSON.stringify({file:item.path})});
+    if(state.config.resource_device_paths)delete state.config.resource_device_paths[item.name];
+    await api('/api/config',{method:'POST',body:JSON.stringify(state.config)});state.config=await api('/api/config');
+    state.resources.splice(index,1);
+    await removeArtifactRow(row);
+    reindexResourceRows();
+    if(!state.resources.length)$('#resourceList').innerHTML=EMPTY_RESOURCE_LIST;
+    updateResourceSelection();
+    toast(`已删除 ${item.name}`);
+  }catch(error){if(button)button.disabled=false;toast(error.message,true)}
+}
 uploadResource=async function(files){const file=files?.[0];if(!file)return;if(!file.name.endsWith('.tar.gz'))return toast('只支持上传 .tar.gz 资源包',true);const body=new FormData();body.append('file',file);try{const response=await fetch('/api/resources/upload',{method:'POST',body});const data=await response.json();if(!response.ok)throw new Error(data.error||'上传失败');toast(`已上传 ${data.name}，请为它配置设备部署目录`);loadResources()}catch(error){toast(error.message,true)}finally{$('#resourceUpload').value=''}}
 pushResources=async function(){const selections=$$('.resource-check:checked').map(input=>{const index=Number(input.dataset.index);return {index,file:input.value,name:state.resources[index].name,device_path:resourceDevicePath(index)}});if(!selections.length)return;const missing=selections.filter(item=>!item.device_path);if(missing.length)return toast('请先为所有选中的资源包配置设备部署目录',true);if(!confirm(`确认推送 ${selections.length} 个资源包？\n\n每个资源包会先删除各自部署目录下与其顶层目录同名的旧内容。`))return;const button=$('#pushResourcesButton');button.disabled=true;button.textContent='推送中…';try{state.config.resource_device_paths={...(state.config.resource_device_paths||{}),...Object.fromEntries(selections.map(item=>[item.name,item.device_path]))};await api('/api/config',{method:'POST',body:JSON.stringify(state.config)});state.config=await api('/api/config');const deployments=selections.map(({file,device_path})=>({file,device_path}));const result=await api('/api/resources/push',{method:'POST',body:JSON.stringify(withAdbSerial({deployments}))});const failed=result.results.filter(item=>!item.ok);toast(failed.length?`推送失败：${failed[0].output}`:`已部署 ${result.results.length} 个资源包`,Boolean(failed.length));if(!failed.length)await loadResources()}catch(error){toast(error.message,true)}finally{updateResourceSelection()}}
 collectSelectedApks=async function(){const files=$$('.apk-source-check:checked').map(input=>({source:input.dataset.source,relative_path:input.dataset.path}));if(!files.length)return toast('请至少选择一个 APK',true);const button=$('#collectApksButton'),overwrite=Boolean($('#apkSourceOverwrite')?.checked);button.disabled=true;button.textContent='导入中…';try{const result=await api('/api/apks/collect',{method:'POST',body:JSON.stringify({files,overwrite})});if(result.requires_confirmation){button.disabled=false;button.textContent='导入所选 APK';if(confirm('adb-tools/apk-center/files/ 已存在同名 APK：\n'+result.conflicts.join('\n')+'\n\n确认覆盖？')){$('#apkSourceOverwrite').checked=true;return collectSelectedApks()}return}closeFeatureConfig();await loadApks();toast('已导入 '+result.results.length+' 个 APK')}catch(error){toast(error.message,true);button.disabled=false;button.textContent='导入所选 APK'}}

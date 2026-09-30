@@ -99,7 +99,7 @@ def _migrate_legacy_files() -> None:
         if old_target.is_dir() and old_target != TARGET_ROOT:
             for item in old_target.rglob("*"):
                 if item.is_file() and not item.is_symlink():
-                    if item.suffix.lower() == ".apk" or item.name.endswith(".idsig"):
+                    if item.suffix.lower() == ".apk":
                         storage.migrate_file(item, TARGET_ROOT / item.name)
                     elif item.name.endswith(".tar.gz"):
                         storage.migrate_file(item, RESOURCE_ROOT / item.name)

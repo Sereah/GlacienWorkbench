@@ -36,7 +36,7 @@ Feature data is isolated:
 - `offline-logs/config.json`.
 - `device-logs/sources.json`, `device-logs/pulls/`.
 - `commands/commands.json`.
-- `captures/`, `device-files/downloads/`, `runtime/web-profile/`.
+- `captures/`, root-level `downloads/` shared Pull staging cache, `runtime/web-profile/`.
 
 All JSON writes must go through `storage.write()` for atomic replacement. Passwords are request-scoped and must never be persisted.
 

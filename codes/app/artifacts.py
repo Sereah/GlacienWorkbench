@@ -3,11 +3,11 @@
 所有前端传入的文件路径都必须重新与固定 target/ 目录扫描结果比对，
 避免 HTTP 参数被篡改后读取、删除或签名任意本地文件。
 """
-import hashlib, os, re, shutil, tarfile
+import hashlib, os, re, shutil, tarfile, threading
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from . import android
-from . import config
+from . import config, storage
 from .config import ROOT
 
 KEYSTORE_SUFFIXES = {".jks", ".keystore"}
@@ -15,6 +15,9 @@ CERT_SHA256_LINE = re.compile(r"^Signer #(\d+) certificate SHA-256 digest:\s*([0
 CERT_DN_LINE = re.compile(r"^Signer #(\d+) certificate DN:\s*(.*)$")
 APK_SIGNATURE_MIN_SDKS = (24, 28, 33)
 APK_PACKAGE_LINE = re.compile(r"^package:\s+name='([^']+)'")
+INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+WINDOWS_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{index}" for index in range(1, 10)), *(f"LPT{index}" for index in range(1, 10))}
+_ARTIFACT_LOCK = threading.RLock()
 
 def target():
     """APK 文件位于 APK Center 自己的用户数据目录。"""
@@ -139,6 +142,48 @@ def managed_apk(settings, body):
     if not item: raise ValueError("文件不属于用户数据目录的 target/")
     return item
 
+def renamed_filename(value, suffix, label):
+    """生成跨平台安全文件名；前端只编辑主名称，扩展名由后端固定。"""
+    stem=str(value or "").strip()
+    if stem.lower().endswith(suffix.lower()): stem=stem[:-len(suffix)].rstrip()
+    if not stem or stem in {".", ".."}: raise ValueError(f"{label}名称不能为空")
+    if INVALID_FILENAME_CHARS.search(stem) or stem.endswith((".", " ")):
+        raise ValueError(f"{label}名称包含系统不支持的字符")
+    if stem.split(".",1)[0].upper() in WINDOWS_RESERVED_NAMES:
+        raise ValueError(f"{label}名称不能使用系统保留名称")
+    filename=stem+suffix
+    if len(filename.encode("utf-8"))>255: raise ValueError(f"{label}名称过长")
+    return filename
+
+def rename_managed_file(source, name, suffix, label):
+    if source.is_symlink() or not source.is_file(): raise ValueError(f"{label}不是可重命名的普通文件")
+    filename=renamed_filename(name,suffix,label);destination=source.with_name(filename)
+    if destination==source: raise ValueError("新文件名与原文件名相同")
+    if destination.exists() or destination.is_symlink(): raise ValueError(f"文件已存在：{filename}")
+    source.rename(destination)
+    return destination
+
+def apk_idsig(apk):
+    """返回 APK v4 签名的同目录 sidecar 路径。"""
+    return apk.with_name(apk.name+".idsig")
+
+def rename_apk(settings, body):
+    """只允许在 APK Center 受管目录内原子重命名，不覆盖已有文件。"""
+    with _ARTIFACT_LOCK:
+        source=managed_apk(settings,body)
+        source_idsig=apk_idsig(source);filename=renamed_filename(body.get("name",""),".apk","APK");output_idsig=source.with_name(filename+".idsig")
+        if source_idsig.is_symlink(): raise ValueError("APK 签名旁路文件不是可重命名的普通文件")
+        if source_idsig.is_file() and (output_idsig.exists() or output_idsig.is_symlink()): raise ValueError(f"文件已存在：{output_idsig.name}")
+        output=rename_managed_file(source,filename,".apk","APK")
+        try:
+            if source_idsig.is_file(): source_idsig.rename(output_idsig)
+        except Exception:
+            output.rename(source)
+            raise
+    suffixes=[Path(item["name"]).stem for item in keystore_files(settings)]
+    signed_with=next((name for name in suffixes if output.stem.endswith(f"-{name}")),None)
+    return {"ok":True,"file":{**details(output),"signed_with":signed_with},"old_name":source.name}
+
 def install(settings, body):
     results=[]
     for raw in body.get("files",[]):
@@ -176,7 +221,9 @@ def push_apk(settings, body):
     return {"ok":not reboot or reboot.get("ok",False),"push_ok":True,"file":item.name,"package_name":package_name,"remote_path":remote,"output":out or "Push 完成","reboot":reboot}
 
 def delete(settings, body):
-    item=managed_apk(settings,body); item.unlink(); return {"ok":True,"file":item.name}
+    item=managed_apk(settings,body);sidecar=apk_idsig(item);item.unlink();sidecar_deleted=False
+    if sidecar.exists() or sidecar.is_symlink(): sidecar.unlink();sidecar_deleted=True
+    return {"ok":True,"file":item.name,"idsig_deleted":sidecar_deleted}
 def checksum(settings, body):
     item=managed_apk(settings,body); return {"file":item.name,"md5":md5(item)}
 def sha256_checksum(settings, body):
@@ -251,16 +298,21 @@ def sign(settings,body):
     aligner=android.tool("zipalign",settings); results=[]
     for raw in body.get("files",[]):
         try:
-            source=managed_apk(settings,{**body,"file":raw}); output=source.with_name(f"{source.stem}-{name}.apk"); signing_input=source; temporary=None
-            if aligner:
-                temporary=output.with_suffix(".aligned.tmp"); code,out,error=android.run([aligner,"-f","-p","4",str(source),str(temporary)],180)
-                if code==0: signing_input=temporary
-                else: temporary=None
-            command=[signer,"sign","--ks",str(jks),"--ks-pass",f"pass:{store}","--key-pass",f"pass:{key}","--out",str(output)]
-            if alias: command.extend(["--ks-key-alias",alias])
-            command.append(str(signing_input))
-            code,out,error=android.run(command,180)
-            if temporary and temporary.exists(): temporary.unlink()
+            source=managed_apk(settings,{**body,"file":raw}); output=source.with_name(f"{source.stem}-{name}.apk"); signing_input=source; temporary=None;output_existed=output.exists();sign_succeeded=False
+            try:
+                if aligner:
+                    temporary=output.with_suffix(".aligned.tmp"); align_code,_,_=android.run([aligner,"-f","-p","4",str(source),str(temporary)],180)
+                    if align_code==0: signing_input=temporary
+                command=[signer,"sign","--v4-signing-enabled","false","--ks",str(jks),"--ks-pass",f"pass:{store}","--key-pass",f"pass:{key}","--out",str(output)]
+                if alias: command.extend(["--ks-key-alias",alias])
+                command.append(str(signing_input))
+                code,out,error=android.run(command,180)
+                sign_succeeded=code==0
+            finally:
+                if temporary and temporary.exists(): temporary.unlink()
+                sidecar=apk_idsig(output)
+                if sidecar.exists() or sidecar.is_symlink(): sidecar.unlink()
+                if not sign_succeeded and not output_existed and output.exists(): output.unlink()
             results.append({"file":source.name,"ok":code==0,"output":str(output) if code==0 else(out or error)})
         except ValueError as error: results.append({"file":raw,"ok":False,"output":str(error)})
     return {"results":results}
@@ -294,6 +346,20 @@ def resource_checksum(settings, body):
 
 def delete_resource(settings, body):
     item=profile_resource(settings,body); item.unlink(); return {"ok":True,"file":item.name}
+
+def rename_resource(settings, body):
+    """重命名资源包并迁移以文件名为键的设备部署路径；配置失败时回滚文件名。"""
+    with _ARTIFACT_LOCK:
+        source=profile_resource(settings,body);old_name=source.name
+        output=rename_managed_file(source,body.get("name",""),".tar.gz","资源包")
+        paths=dict(settings.get("resource_device_paths",{}));device_path=paths.pop(old_name,"")
+        if device_path:
+            paths[output.name]=device_path
+            try: storage.update("resources",{"resource_device_paths":paths})
+            except Exception:
+                output.rename(source)
+                raise
+    return {"ok":True,"file":{**details(output),"device_path":device_path},"old_name":old_name}
 
 def upload_resource(settings, filename, content):
     """保存 Web 上传的资源包；只接受不带路径的 .tar.gz 文件名。"""
