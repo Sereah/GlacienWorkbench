@@ -28,7 +28,10 @@ function reindexApkRows(){
     if(certificate)certificate.id=`cert-sha256-${index}`;
   });
 }
-const artifactListRequests={apk:0,sign:0};
+const artifactListRequests={apk:0,sign:0,resource:0};
+const artifactListSnapshots={sign:null};
+function artifactListsEqual(current,next){return JSON.stringify(current)===JSON.stringify(next)}
+function artifactListChanged(list,current,next){return list.dataset.loaded!=='true'||!artifactListsEqual(current,next)}
 function artifactListSkeleton(message){return `<div class="artifact-list-skeleton" role="status" aria-label="${escapeHtml(message)}">${Array.from({length:3},()=>'<div class="artifact-skeleton-row"><i></i><span><i></i><i></i></span></div>').join('')}</div>`;}
 function beginArtifactListRefresh(list,button,message){
   const hasContent=list.dataset.loaded==='true';
@@ -93,12 +96,14 @@ async function submitArtifactRename(){
   }catch(error){button.disabled=false;button.textContent='重命名';toast(error.message,true)}
 }
 async function loadApks(showLoading=true) {
-  const list=$('#apkList'),button=$('#apkRefreshButton'),selected=new Set(selectedApks()),requestId=++artifactListRequests.apk,hadContent=showLoading?beginArtifactListRefresh(list,button,'正在扫描 APK 文件'):list.dataset.loaded==='true';
-  if(!showLoading)list.setAttribute('aria-busy','true');
+  const list=$('#apkList'),button=$('#apkRefreshButton'),selected=new Set(selectedApks()),requestId=++artifactListRequests.apk,showProgress=showLoading||list.dataset.loaded!=='true',hadContent=showProgress?beginArtifactListRefresh(list,button,'正在扫描 APK 文件'):true;
+  if(!showProgress)list.setAttribute('aria-busy','true');
   try {
-    const apks=await api('/api/apks');if(requestId!==artifactListRequests.apk)return false;state.apks=apks;
+    const apks=await api('/api/apks');if(requestId!==artifactListRequests.apk)return false;
+    const changed=artifactListChanged(list,state.apks,apks);state.apks=apks;
+    if(!changed){finishArtifactListRefresh(list,button,true,false);return true;}
     list.innerHTML = state.apks.length ? state.apks.map((apk, i) => `<div class="artifact-row" data-index="${i}"><input class="check apk-check" type="checkbox" value="${escapeHtml(apk.path)}" onchange="updateApkSelection()"><span class="file-icon">APK</span><span class="artifact-main"><b data-artifact-name>${escapeHtml(apk.name)}</b><span>${formatSize(apk.size)} · ${new Date(apk.modified).toLocaleString()}</span><span>包名：${escapeHtml(apk.package_name||'未识别')}</span><span class="checksum-value" data-apk-result="md5" id="md5-${i}">MD5：按“MD5”计算</span><span class="checksum-value" data-apk-result="sha256" id="sha256-${i}">文件 SHA-256：按“SHA-256”计算</span><span class="checksum-value" data-apk-result="certificate" id="cert-sha256-${i}">证书 SHA-256：按“证书 SHA-256”计算</span></span><span class="tag" data-apk-signing>${apk.signed_with?`SIGNED: ${escapeHtml(apk.signed_with)}`:'未识别签名'}</span><button class="row-action" onclick="showMd5(artifactRowIndex(this))">MD5</button><button class="row-action" onclick="showApkSha256(artifactRowIndex(this))">SHA-256</button><button class="row-action" onclick="showApkCertificateSha256(artifactRowIndex(this))">证书 SHA-256</button><button class="row-action" onclick="openApkPush(artifactRowIndex(this))">Push</button><button class="row-action" onclick="openArtifactRename('apk',artifactRowIndex(this))">重命名</button><button class="row-action danger-action" onclick="deleteApk(artifactRowIndex(this),this)">删除</button></div>`).join('') : EMPTY_APK_LIST;
-    $$('#apkList .apk-check').forEach(input=>input.checked=selected.has(input.value));updateApkSelection();finishArtifactListRefresh(list,button,true,showLoading);return true;
+    $$('#apkList .apk-check').forEach(input=>input.checked=selected.has(input.value));updateApkSelection();finishArtifactListRefresh(list,button,true,showLoading&&hadContent);return true;
   } catch (e) { if(requestId!==artifactListRequests.apk)return false;if(!hadContent)list.innerHTML = `<div class="artifact-row">${escapeHtml(e.message)}</div>`;else toast(`刷新 APK 列表失败：${e.message}`,true);finishArtifactListRefresh(list,button,false,false);return false; }
 }
 async function showMd5(index){const apk=state.apks[index],target=$(`#md5-${index}`);if(!apk||!target)return;target.textContent='MD5：计算中…';try{const r=await api('/api/apks/md5',{method:'POST',body:JSON.stringify({file:apk.path})});target.textContent=`MD5：${r.md5}`;await navigator.clipboard?.writeText(r.md5);toast(`MD5 已计算并复制到剪贴板：${apk.name}`)}catch(e){target.textContent='MD5：计算失败';toast(e.message,true)}}
@@ -157,18 +162,21 @@ async function installSelected() {
   } catch(e) { toast(e.message, true); } finally { $('#installButton').textContent = '安装所选项'; updateApkSelection(); }
 }
 
-function switchApkTab(tab){state.apkTab=tab;document.querySelectorAll('.apk-tab').forEach(x=>x.classList.toggle('active',x.dataset.apkTab===tab));document.querySelectorAll('.apk-subpage').forEach(x=>x.classList.toggle('visible',x.id===`apk-tab-${tab}`));if(tab==='local')loadApks();if(tab==='sign')loadSignPage();if(tab==='resources')loadResources()}
+function switchApkTab(tab){state.apkTab=tab;document.querySelectorAll('.apk-tab').forEach(x=>x.classList.toggle('active',x.dataset.apkTab===tab));document.querySelectorAll('.apk-subpage').forEach(x=>x.classList.toggle('visible',x.id===`apk-tab-${tab}`));if(tab==='local')loadApks(false);if(tab==='sign')loadSignPage(false);if(tab==='resources')loadResources(false)}
 
-async function loadSignPage(){
-  const list=$('#signList'),button=$('#signRefreshButton'),selectedFiles=new Set(selectedSignApks()),select=$('#keystoreSelect'),selectedKeystore=select.value,requestId=++artifactListRequests.sign,hadContent=beginArtifactListRefresh(list,button,'正在读取 APK 与签名文件');
+async function loadSignPage(showLoading=true){
+  const list=$('#signList'),button=$('#signRefreshButton'),selectedFiles=new Set(selectedSignApks()),select=$('#keystoreSelect'),selectedKeystore=select.value,requestId=++artifactListRequests.sign,showProgress=showLoading||list.dataset.loaded!=='true',hadContent=showProgress?beginArtifactListRefresh(list,button,'正在读取 APK 与签名文件'):true;
+  if(!showProgress)list.setAttribute('aria-busy','true');
   try{
     const [apks,keys]=await Promise.all([api('/api/apks'),api('/api/keystores')]);
     if(requestId!==artifactListRequests.sign)return false;
+    const snapshot={apks,keys},changed=artifactListChanged(list,artifactListSnapshots.sign,snapshot);artifactListSnapshots.sign=snapshot;
+    if(!changed){finishArtifactListRefresh(list,button,true,false);return true;}
     select.innerHTML=keys.map(k=>`<option value="${escapeHtml(k.name)}" ${k.available?'':'disabled'}>${escapeHtml(k.name)}${k.available?'':'（文件不存在）'}</option>`).join('');
     if(keys.some(key=>key.name===selectedKeystore&&key.available))select.value=selectedKeystore;
     const selected=keys.find(k=>k.name===select.value);$('#keystoreHint').textContent=selected?'已选择受管签名文件；只有多 key 文件才需要填写 Alias。':'请先上传并选择签名文件。';
     list.innerHTML=apks.length?apks.map(apk=>`<label class="artifact-row"><input class="check sign-check" type="checkbox" value="${escapeHtml(apk.path)}" onchange="updateSignSelection()"><span class="file-icon">APK</span><span class="artifact-main"><b>${escapeHtml(apk.name)}</b><span>${formatSize(apk.size)} · ${new Date(apk.modified).toLocaleString()}</span><span>${apk.signed_with?`已由受管签名文件 “${escapeHtml(apk.signed_with)}”生成`:'未识别为本工具生成的签名输出'}</span></span><span class="tag">${apk.signed_with?`SIGNED: ${escapeHtml(apk.signed_with)}`:'SOURCE APK'}</span></label>`).join(''):'<div class="artifact-row">没有可签名的 APK。</div>';
-    $$('#signList .sign-check').forEach(input=>input.checked=selectedFiles.has(input.value));updateSignSelection();finishArtifactListRefresh(list,button,true);return true;
+    $$('#signList .sign-check').forEach(input=>input.checked=selectedFiles.has(input.value));updateSignSelection();finishArtifactListRefresh(list,button,true,showLoading&&hadContent);return true;
   }catch(e){if(requestId!==artifactListRequests.sign)return false;if(!hadContent)list.innerHTML=`<div class="artifact-row">${escapeHtml(e.message)}</div>`;else toast(`刷新签名 APK 列表失败：${e.message}`,true);finishArtifactListRefresh(list,button,false,false);return false;}
 }
 function selectedSignApks(){return [...document.querySelectorAll('.sign-check:checked')].map(x=>x.value)}

@@ -1022,13 +1022,15 @@ function reindexResourceRows(){
   });
 }
 loadResources=async function(showLoading=true){
-  const list=$('#resourceList'),selected=new Set(selectedResources()),drafts=new Map($$('#resourceList .resource-row').map(row=>[row.querySelector('.resource-check')?.value,row.querySelector('.resource-path-field input')?.value]).filter(item=>item[0]));
-  if(showLoading)list.innerHTML='<div class="artifact-row">正在扫描资源包…</div>';
+  const list=$('#resourceList'),selected=new Set(selectedResources()),drafts=new Map($$('#resourceList .resource-row').map(row=>[row.querySelector('.resource-check')?.value,row.querySelector('.resource-path-field input')?.value]).filter(item=>item[0])),requestId=++artifactListRequests.resource,showProgress=showLoading||list.dataset.loaded!=='true',hadContent=showProgress?beginArtifactListRefresh(list,null,'正在扫描资源包'):true;
+  if(!showProgress)list.setAttribute('aria-busy','true');
   try{
-    state.resources=await api('/api/resources');
+    const resources=await api('/api/resources');if(requestId!==artifactListRequests.resource)return false;
+    const changed=artifactListChanged(list,state.resources,resources);state.resources=resources;
+    if(!changed){finishArtifactListRefresh(list,null,true,false);return true;}
     list.innerHTML=state.resources.length?state.resources.map((item,index)=>`<div class="artifact-row resource-row" data-index="${index}"><input class="check resource-check" type="checkbox" value="${escapeHtml(item.path)}" data-index="${index}" onchange="updateResourceSelection()"><span class="file-icon">TAR</span><span class="artifact-main"><b data-artifact-name>${escapeHtml(item.name)}</b><span>${formatSize(item.size)} · ${new Date(item.modified).toLocaleString()}</span><span class="md5-value" id="resource-md5-${index}">MD5：按“MD5”计算 · 推送前清理：${escapeHtml((item.cleanup_entries||[]).join('、')||'无顶层内容')}</span><label class="resource-path-field"><span>设备部署目录</span><input id="resource-path-${index}" value="${escapeHtml(drafts.has(item.path)?drafts.get(item.path):item.device_path||'')}" placeholder="/sdcard/resources/"></label></span><button class="row-action" onclick="saveResourcePath(artifactRowIndex(this))">保存路径</button><button class="row-action" onclick="showResourceMd5(artifactRowIndex(this))">MD5</button><button class="row-action" onclick="openArtifactRename('resource',artifactRowIndex(this))">重命名</button><button class="row-action danger-action" onclick="deleteResource(artifactRowIndex(this),this)">删除</button></div>`).join(''):EMPTY_RESOURCE_LIST;
-    $$('.resource-check').forEach(input=>input.checked=selected.has(input.value));updateResourceSelection();return true;
-  }catch(error){if(showLoading)list.innerHTML=`<div class="artifact-row">${escapeHtml(error.message)}</div>`;else toast(`重命名成功，但刷新资源列表失败：${error.message}`,true);return false;}
+    $$('.resource-check').forEach(input=>input.checked=selected.has(input.value));updateResourceSelection();finishArtifactListRefresh(list,null,true,showLoading&&hadContent);return true;
+  }catch(error){if(requestId!==artifactListRequests.resource)return false;if(!hadContent)list.innerHTML=`<div class="artifact-row">${escapeHtml(error.message)}</div>`;else toast(`刷新资源列表失败：${error.message}`,true);finishArtifactListRefresh(list,null,false,false);return false;}
 }
 showResourceMd5=async function(index){const item=state.resources[index],target=$(`#resource-md5-${index}`);if(!item||!target)return;target.textContent='MD5：计算中…';try{const result=await api('/api/resources/md5',{method:'POST',body:JSON.stringify({file:item.path})});target.textContent=`MD5：${result.md5} · 推送前清理：${(item.cleanup_entries||[]).join('、')||'无顶层内容'}`;await navigator.clipboard?.writeText(result.md5);toast(`MD5 已计算并复制到剪贴板：${item.name}`)}catch(error){target.textContent='MD5：计算失败';toast(error.message,true)}}
 deleteResource=async function(index,button){
