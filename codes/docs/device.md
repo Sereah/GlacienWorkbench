@@ -12,6 +12,7 @@
 - ADB 首页另提供用户明确要求的“强杀 ADB”入口，固定执行 `pkill -9 -x adb`，不接受前端命令参数。该操作会中断全部本机 ADB 会话，必须二次确认并先关闭当前 Logcat；Windows 明确返回不支持。
 - ADB 首页的 Root/Remount 状态只通过对应操作按钮展示，不在下方设备信息卡重复显示。设备重启使用经过 serial 校验的 adb -s <serial> reboot，前端必须二次确认、停止当前 Logcat，并由现有状态轮询跟踪设备离线和恢复。
 - 多设备时，ADB 首页选择的序列号只保存在浏览器本地；`android.selected_device_settings()` 必须先在当前 `adb devices` 结果中验证它是 `device` 状态，随后 `android.device_adb()` 强制添加 `-s <serial>`。没有选择时只有恰好一台已授权设备可自动采用；两台及以上必须拒绝设备操作，不能退回第一台。
+- Android User 列表通过已验证设备的 `pm list users` 与 `am get-current-user` 实时读取，返回 User ID、名称、current 与 running 状态。User 列表与部署选择不写入用户配置，每次有副作用的请求都必须重新扫描并验证 User ID。
 - `app/device.py` 负责进程、平台签名比较、拉起/停止和广播。
 - `app/app_manager.py` 负责全量应用列表、按需详情、启停、清除数据、启用/禁用和 Pull APK。应用列表只使用批量命令，不允许为每个包逐一执行 `dumpsys package`；`pm list packages -f -U` 的 UID 字段必须兼容多用户设备返回的逗号分隔值。完整详情只在用户展开单个应用时读取。
 - 应用管理与关注应用复用 `app_manager.py` 返回的同一份设备应用快照和同一种卡片；关注应用合并 `watched_packages` 手动星标与 `process_package_keywords` 关键词规则，不再建立第二条 ADB 刷新链路。列表卡片和详情页都将 `pm list packages -U` 的安装 UID 与 `ps` 的运行实例分开展示，每个运行实例保留 `USER / UID / PID / NAME` 的完整对应。版本和平台签名在用户打开统一详情页时读取，证书 SHA-256 在详情页按需计算。

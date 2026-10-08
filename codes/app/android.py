@@ -6,6 +6,8 @@ from pathlib import Path
 
 from . import proc
 
+USER_INFO_LINE = re.compile(r"UserInfo\{(?P<user_id>\d+):(?P<name>[^:]*):[^}]+\}(?P<state>.*)$")
+
 def _configured_tool(name: str, value: object, suffix: str) -> str | None:
     """兼容 SDK 根目录、工具目录和完整工具路径。"""
     text = str(value or "").strip()
@@ -169,6 +171,55 @@ def device_adb_bytes(settings: dict, *args: str, timeout: int = 30) -> tuple[int
     if not executable:
         return 127, b"", "未找到 adb，请安装 Android Platform-Tools，或配置 Android SDK / platform-tools / adb 路径"
     return run_bytes([executable, "-s", serial, *args], timeout)
+
+def parse_users(output: str, current_user: int = -1) -> list[dict]:
+    """解析 `pm list users`，用于所有需要明确 Android User 的设备操作。"""
+    result = []
+    for line in output.splitlines():
+        match = USER_INFO_LINE.search(line.strip())
+        if not match:
+            continue
+        user_id = int(match.group("user_id"))
+        raw_name = match.group("name")
+        name = "System" if user_id == 0 and raw_name in {"", "null"} else raw_name or f"User {user_id}"
+        result.append({
+            "user_id": user_id,
+            "name": name,
+            "current": user_id == current_user,
+            "running": "running" in match.group("state").lower(),
+        })
+    return result
+
+def users(settings: dict) -> dict:
+    """读取当前已验证设备的 User 列表；User 状态不持久化到配置。"""
+    code, output, error = device_adb(settings, "shell", "pm", "list", "users", timeout=30)
+    if code:
+        raise ValueError(error or output or "读取 Android User 列表失败")
+    current_code, current_output, _ = device_adb(settings, "shell", "am", "get-current-user", timeout=30)
+    current_user = int(current_output.strip()) if current_code == 0 and current_output.strip().isdigit() else -1
+    items = parse_users(output, current_user)
+    if not items:
+        raise ValueError("设备未返回可用的 Android User")
+    return {"current_user_id": current_user, "items": items}
+
+def validated_user_ids(settings: dict, values: object) -> tuple[list[int], dict]:
+    """重新扫描设备 User，禁止浏览器构造不存在的安装目标。"""
+    if not isinstance(values, list) or not values:
+        raise ValueError("请至少选择一个 Android User")
+    user_ids = []
+    for value in values:
+        raw = str(value).strip()
+        if isinstance(value, bool) or not re.fullmatch(r"\d{1,4}", raw):
+            raise ValueError("Android User ID 无效")
+        user_id = int(raw)
+        if user_id not in user_ids:
+            user_ids.append(user_id)
+    catalog = users(settings)
+    available = {item["user_id"] for item in catalog["items"]}
+    missing = [user_id for user_id in user_ids if user_id not in available]
+    if missing:
+        raise ValueError(f"Android User 不存在：{', '.join(map(str, missing))}")
+    return user_ids, catalog
 
 def _wireless_serial(value: str) -> tuple[str, int] | None:
     """识别 adb devices 中的 IPv4:port serial。"""

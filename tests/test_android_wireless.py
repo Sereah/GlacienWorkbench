@@ -8,6 +8,25 @@ from codes.app import android
 
 
 class WirelessAdbTest(unittest.TestCase):
+    def test_parse_users_keeps_current_and_running_state(self):
+        output = """Users:
+ UserInfo{0:机主:4c13} running
+ UserInfo{10:新用户:400}
+ UserInfo{11:新用户:400} running
+"""
+
+        self.assertEqual([
+            {"user_id": 0, "name": "机主", "current": True, "running": True},
+            {"user_id": 10, "name": "新用户", "current": False, "running": False},
+            {"user_id": 11, "name": "新用户", "current": False, "running": True},
+        ], android.parse_users(output, 0))
+
+    def test_validated_user_ids_rejects_unknown_user(self):
+        catalog = {"current_user_id": 0, "items": [{"user_id": 0}, {"user_id": 10}]}
+        with patch.object(android, "users", return_value=catalog):
+            with self.assertRaisesRegex(ValueError, "User 不存在：11"):
+                android.validated_user_ids({}, [0, 11])
+
     def test_mdns_only_keeps_connectable_services(self):
         output = """List of discovered mdns services
 pixel _adb._tcp 192.168.1.20:5555

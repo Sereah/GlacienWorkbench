@@ -10,7 +10,6 @@ from . import android, device, device_files
 PACKAGE_NAME = re.compile(r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*")
 PACKAGE_LINE = re.compile(r"^package:(?P<path>.+?)=(?P<package>[A-Za-z0-9_.]+)(?:\s+uid:(?P<uid>\d+(?:,\d+)*))?$")
 PACKAGE_USER_LINE = re.compile(r"^\s*User (?P<user_id>\d+):\s*(?P<state>.*)$", re.MULTILINE)
-USER_INFO_LINE = re.compile(r"UserInfo\{(?P<user_id>\d+):(?P<name>[^:]*):")
 ENABLED_STATE = re.compile(r"^\s*enabled=(\d+)\s*$", re.MULTILINE)
 FIRST_INSTALL = re.compile(r"^\s*firstInstallTime=(.*?)\s*$", re.MULTILINE)
 LAST_UPDATE = re.compile(r"^\s*lastUpdateTime=(.*?)\s*$", re.MULTILINE)
@@ -126,16 +125,13 @@ def _user_context(settings: dict, package_dump: str) -> list[dict]:
     users = _package_user_states(package_dump)
     if not users:
         return []
-    _, user_output, _ = android.device_adb(settings, "shell", "pm", "list", "users", timeout=30)
-    names = {
-        int(match.group("user_id")): ("System" if match.group("user_id") == "0" and match.group("name") in {"", "null"} else match.group("name") or f"User {match.group('user_id')}")
-        for match in USER_INFO_LINE.finditer(user_output)
-    }
-    _, current_output, _ = android.device_adb(settings, "shell", "am", "get-current-user", timeout=30)
-    current_user = int(current_output.strip()) if current_output.strip().isdigit() else -1
+    catalog = android.users(settings)
+    by_id = {item["user_id"]: item for item in catalog["items"]}
     for user in users:
-        user["name"] = names.get(user["user_id"], f"User {user['user_id']}")
-        user["current"] = user["user_id"] == current_user
+        context = by_id.get(user["user_id"], {})
+        user["name"] = context.get("name", f"User {user['user_id']}")
+        user["current"] = bool(context.get("current"))
+        user["running"] = bool(context.get("running"))
     return users
 
 

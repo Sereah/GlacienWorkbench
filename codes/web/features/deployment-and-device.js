@@ -142,6 +142,7 @@ function openApkPush(index){
   const pathLabel=document.createElement('label');pathLabel.className='feature-field';const pathTitle=document.createElement('span'),pathInput=document.createElement('input'),pathHint=document.createElement('small');pathTitle.textContent='设备端目标目录';pathInput.id='apkPushDevicePath';pathInput.placeholder='/system/priv-app/VehicleControl';pathInput.value=(apk.package_name&&savedByPackage[apk.package_name])||'';pathInput.addEventListener('input',apkPushPreview);pathHint.textContent=apk.package_name?`按包名 ${apk.package_name} 单独记忆此路径`:'未识别 APK 包名，本次路径不会按包名保存';pathLabel.append(pathTitle,pathInput,pathHint);
   const preview=document.createElement('div');preview.className='apk-push-preview';const previewLabel=document.createElement('span'),previewValue=document.createElement('code');previewLabel.textContent='最终设备文件';previewValue.id='apkPushPreview';preview.append(previewLabel,previewValue);
   const reboot=document.createElement('label');reboot.className='apk-push-reboot';reboot.innerHTML='<input id="apkPushReboot" type="checkbox"> Push 成功后重启设备';root.append(file,pathLabel,preview,reboot);$('#configModalBody').replaceChildren(root);apkPushPreview();
+  const userHint=document.createElement('p');userHint.className='page-description';userHint.textContent='Push 只复制 APK 文件，不会改变任何 Android User 的应用安装状态。';root.append(userHint);
   const footer=$('#configModal .config-dialog-footer');footer.hidden=false;footer.innerHTML='<button class="button subtle" id="apkPushCancel">取消</button><button class="button primary" id="apkPushExecute">执行</button>';$('#apkPushCancel').onclick=closeFeatureConfig;$('#apkPushExecute').onclick=executeApkPush;
 }
 async function executeApkPush(){
@@ -154,12 +155,36 @@ async function executeApkPush(){
   }catch(error){toast(error.message,true);execute.disabled=false;cancel.disabled=false;execute.textContent='执行';}
 }
 
-async function installSelected() {
-  const files = selectedApks(); if (!files.length) return; $('#installButton').disabled = true; $('#installButton').textContent = '安装中…';
-  try {
-    const r = await api('/api/install', { method:'POST', body:JSON.stringify(withAdbSerial({ files })) });
-    const failed = r.results.filter(x => !x.ok); toast(failed.length ? `${failed.length} 项安装失败：${failed[0].output}` : `已完成 ${r.results.length} 个 APK 的安装`, !!failed.length);
-  } catch(e) { toast(e.message, true); } finally { $('#installButton').textContent = '安装所选项'; updateApkSelection(); }
+function apkInstallUserLabel(user){return `User ${user.user_id} · ${user.name}${user.current?' · 当前用户':''}${user.running?' · 运行中':' · 未运行'}`}
+function selectedApkInstallUsers(){return $$('.apk-install-user:checked').map(input=>Number(input.value))}
+function updateApkInstallSelection(){
+  const users=$$('.apk-install-user'),selected=selectedApkInstallUsers(),all=$('#apkInstallAllUsers'),execute=$('#apkInstallExecute'),replace=$('#apkInstallReplace'),downgrade=$('#apkInstallDowngrade');
+  if(all){all.checked=Boolean(users.length)&&selected.length===users.length;all.indeterminate=selected.length>0&&selected.length<users.length;}
+  if(downgrade){downgrade.disabled=!replace?.checked;if(downgrade.disabled)downgrade.checked=false;}
+  if(execute)execute.disabled=!selected.length;
+}
+function toggleAllApkInstallUsers(checked){$$('.apk-install-user').forEach(input=>input.checked=checked);updateApkInstallSelection()}
+function apkInstallDialog(files,users){
+  const names=files.map(path=>state.apks.find(item=>item.path===path)?.name||path);
+  return `<div class="apk-install-dialog"><section><b>已选择 ${files.length} 个 APK</b><div class="apk-install-files">${names.map(name=>`<code>${escapeHtml(name)}</code>`).join('')}</div></section><section><header><div><b>目标 Android User</b><small>每次打开都从当前设备重新读取。</small></div><label><input id="apkInstallAllUsers" type="checkbox" onchange="toggleAllApkInstallUsers(this.checked)"> 全选</label></header><div class="apk-install-users">${users.map(user=>`<label><input class="apk-install-user" type="checkbox" value="${user.user_id}" ${user.current?'checked':''} onchange="updateApkInstallSelection()"><span><b>${escapeHtml(apkInstallUserLabel(user))}</b></span></label>`).join('')}</div></section><section><b>安装选项</b><div class="apk-install-options"><label><input id="apkInstallReplace" type="checkbox" checked onchange="updateApkInstallSelection()"> 允许覆盖已有应用并保留数据 <code>-r</code></label><label><input id="apkInstallDowngrade" type="checkbox"> 允许版本降级 <code>-d</code></label><label><input id="apkInstallGrant" type="checkbox"> 自动授予运行时权限 <code>-g</code></label><label><input id="apkInstallTestOnly" type="checkbox"> 允许安装测试 APK <code>-t</code></label></div></section><p class="safe-note">选择 User 控制应用在哪些用户下可用；APK 代码版本由设备共享，更新时可能影响其他已安装该包的 User。</p><div id="apkInstallResults"></div><div class="apk-install-actions"><button class="button subtle" type="button" onclick="closeFeatureConfig()">取消</button><button class="button primary" id="apkInstallExecute" type="button" onclick="executeApkInstall()">开始安装</button></div></div>`;
+}
+async function openApkInstall(){
+  const files=selectedApks();if(!files.length)return;
+  state.apkInstall={files,users:[]};openFeatureModal('apk-install','安装 APK','<div class="app-detail-loading"><div class="app-detail-loading-heading"><span class="app-detail-spinner"></span><b>正在读取设备 User…</b></div></div>',{hideFooter:true});
+  try{const result=await api(apiPathWithSerial('/api/android-users'));if(state.featureConfigKind!=='apk-install')return;state.apkInstall.users=result.items||[];$('#configModalBody').innerHTML=apkInstallDialog(files,state.apkInstall.users);updateApkInstallSelection();}
+  catch(error){if(state.featureConfigKind==='apk-install')$('#configModalBody').innerHTML=`<p class="user-guide-error">${escapeHtml(error.message)}</p>`;}
+}
+function renderApkInstallResults(results){
+  const users=new Map((state.apkInstall?.users||[]).map(user=>[user.user_id,user]));
+  return `<div class="apk-install-result-list">${results.map(item=>`<div class="apk-install-result ${item.ok?'success':'failed'}"><span>${item.ok?'✓':'!'}</span><div><b>${escapeHtml(item.file)} · ${escapeHtml(apkInstallUserLabel(users.get(item.user_id)||{user_id:item.user_id,name:'未知 User',current:false,running:false}))}</b><small>${escapeHtml(item.output||(item.ok?'安装完成':'安装失败'))}</small></div></div>`).join('')}</div>`;
+}
+async function executeApkInstall(){
+  const button=$('#apkInstallExecute'),cancel=$('.apk-install-actions .button.subtle'),userIds=selectedApkInstallUsers();if(!button||!userIds.length)return;
+  const options={replace:$('#apkInstallReplace').checked,downgrade:$('#apkInstallDowngrade').checked,grant_permissions:$('#apkInstallGrant').checked,test_only:$('#apkInstallTestOnly').checked};
+  button.disabled=true;button.textContent='安装中…';if(cancel)cancel.disabled=true;$$('#configModalBody input').forEach(input=>input.disabled=true);
+  try{const result=await api('/api/install',{method:'POST',body:JSON.stringify(withAdbSerial({files:state.apkInstall.files,user_ids:userIds,options}))});if(state.featureConfigKind!=='apk-install')return;$('#apkInstallResults').innerHTML=renderApkInstallResults(result.results||[]);const failed=(result.results||[]).filter(item=>!item.ok);button.textContent='重新安装';toast(failed.length?`${failed.length} 项安装失败`:`已完成 ${result.results.length} 项 User 安装`,Boolean(failed.length));}
+  catch(error){toast(error.message,true);button.textContent='重试安装';}
+  finally{if(state.featureConfigKind==='apk-install'){if(cancel)cancel.disabled=false;$$('#configModalBody input').forEach(input=>input.disabled=false);updateApkInstallSelection();}}
 }
 
 function switchApkTab(tab){state.apkTab=tab;document.querySelectorAll('.apk-tab').forEach(x=>x.classList.toggle('active',x.dataset.apkTab===tab));document.querySelectorAll('.apk-subpage').forEach(x=>x.classList.toggle('visible',x.id===`apk-tab-${tab}`));if(tab==='local')loadApks(false);if(tab==='sign')loadSignPage(false);if(tab==='resources')loadResources(false)}

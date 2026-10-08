@@ -230,6 +230,7 @@ ADB 工具
 | 接口 | 作用 |
 | --- | --- |
 | `/api/status` | ADB 和设备状态 |
+| `/api/android-users` | 当前设备的 Android User、current 和 running 状态 |
 | `/api/adb/wireless-suggestion` | 无线地址建议及网络信息 |
 | `/api/adb/pairing-status` | Android 11+ 配对能力与 mDNS 服务 |
 | `/api/config` | 聚合配置只读视图及 `_meta` |

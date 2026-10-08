@@ -75,9 +75,11 @@ chmod +x Glacien
 - 进入页面或切换 Tab 时会检查最新文件列表，只有数据变化时才更新界面，避免无变化时重置勾选、摘要结果或未保存的资源路径。
 - “安装 APK”和“签名 APK”切换或手动刷新时保留当前列表，后台读取完成后平滑更新；首次进入使用骨架加载提示。
 - “安装 APK”页点击“上传 APK”添加到 `adb-tools/apk-center/files/`；可安装、重命名、删除、计算文件 MD5 / SHA-256，或通过 `apksigner` 读取签名证书 SHA-256。重命名只编辑主名称并固定保留 `.apk` 扩展名，不覆盖已有同名文件。
+- 点击“安装所选项”后，弹窗实时读取设备的 Android User，默认选中当前 User，并支持多选或全选。可按本次操作选择 `-r` 覆盖保留数据、`-d` 允许降级、`-g` 授予运行时权限和 `-t` 允许测试 APK。安装结果按 APK 与 User 分项展示，弹窗保持打开便于查看。
 - 可在“配置 APK 来源”中保存多个命名的构建输出目录；点击“从构建目录导入”会递归列出其中的 APK，并默认勾选每个来源最新修改的文件。可手动多选后批量复制到当前 APK 目标，来源文件不会被移动或删除。
 - 导入时如果 `adb-tools/apk-center/files/` 已有同名 APK，会再次确认是否覆盖；同一次选择中的多个同名 APK 不允许静默覆盖。
 - 每个 APK 行可点击 Push，填写设备端目录后，APK 会按目录末级名称重命名。例如 `/system/priv-app/VehicleControl` 会写入 `/system/priv-app/VehicleControl/VehicleControl.apk`。成功路径按 APK Manifest 包名分别记忆：同包名 APK 复用路径，不同包名互不影响；旧通用路径仅用于首次兼容回填。
+- APK Push 只复制文件，不改变任何 Android User 的应用安装状态，因此 Push 弹窗不提供 User 选择。
 - Push 弹窗可选择成功后重启设备。设备目录按当前 APK 目标保存，重启选项不保存；只有 Push 成功才会执行重启。
 - “签名 APK”页点击“上传签名文件”添加 `.jks` 或 `.keystore`；签名文件保存在 `adb-tools/apk-center/keystores/`，密码只在本次请求中使用。
 - 在签名页选择签名文件、按需填写 Alias（仅多 key 文件需要），勾选 APK 并输入本次密码即可签名；密码不会保存。

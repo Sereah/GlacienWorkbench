@@ -104,6 +104,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             route=parsed.path
             if route=="/api/status": return self.reply({"device":android.status(settings,q.get("serial",[""])[0]),"platform":platform.system(),"adb":bool(android.tool("adb",settings))})
+            if route=="/api/android-users": return self.reply(android.users(android.selected_device_settings(settings,q.get("serial",[""])[0])))
             if route=="/api/adb/restart": return self.reply(android.restart_server(settings))
             if route=="/api/adb/wireless-suggestion": return self.reply(android.wireless_suggestion(settings,q.get("serial",[""])[0]))
             if route=="/api/adb/pairing-status": return self.reply(android.wireless_pairing_status(settings))

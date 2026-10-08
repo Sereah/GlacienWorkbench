@@ -184,13 +184,49 @@ def rename_apk(settings, body):
     signed_with=next((name for name in suffixes if output.stem.endswith(f"-{name}")),None)
     return {"ok":True,"file":{**details(output),"signed_with":signed_with},"old_name":source.name}
 
+INSTALL_OPTION_FLAGS = {
+    "replace": "-r",
+    "downgrade": "-d",
+    "grant_permissions": "-g",
+    "test_only": "-t",
+}
+
+def install_options(value):
+    """安装参数使用固定白名单，不允许浏览器传入任意 ADB 选项。"""
+    if value is None:
+        value = {}
+    if not isinstance(value, dict) or set(value)-set(INSTALL_OPTION_FLAGS):
+        raise ValueError("APK 安装选项无效")
+    options = {"replace": True, "downgrade": False, "grant_permissions": False, "test_only": False}
+    for name, enabled in value.items():
+        if not isinstance(enabled, bool):
+            raise ValueError(f"APK 安装选项 {name} 必须是布尔值")
+        options[name] = enabled
+    if options["downgrade"] and not options["replace"]:
+        raise ValueError("允许版本降级时必须同时允许覆盖已有应用")
+    return options
+
 def install(settings, body):
-    results=[]
-    for raw in body.get("files",[]):
+    files=body.get("files",[])
+    if not isinstance(files,list) or not files:
+        raise ValueError("请选择要安装的 APK")
+    user_ids,catalog=android.validated_user_ids(settings,body.get("user_ids"))
+    options=install_options(body.get("options"));flags=[flag for name,flag in INSTALL_OPTION_FLAGS.items() if options[name]];results=[]
+    for raw in files:
         try:
-            item=managed_apk(settings,{**body,"file":raw}); code,out,error=android.device_adb(settings,"install","-r",str(item),timeout=180); results.append({"file":item.name,"ok":code==0,"output":out or error})
-        except ValueError as error: results.append({"file":raw,"ok":False,"output":str(error)})
-    return {"results":results}
+            item=managed_apk(settings,{**body,"file":raw});package_name=apk_package_name(settings,item)
+        except ValueError as error:
+            results.extend({"file":str(raw),"package_name":"","user_id":user_id,"ok":False,"output":str(error)} for user_id in user_ids)
+            continue
+        first_ok=False
+        for index,user_id in enumerate(user_ids):
+            if index and not options["replace"] and first_ok and package_name:
+                code,out,error=android.device_adb(settings,"shell","pm","install-existing","--user",str(user_id),"--wait",package_name,timeout=60)
+            else:
+                code,out,error=android.device_adb(settings,"install",*flags,"--user",str(user_id),str(item),timeout=180)
+            ok=code==0;first_ok=first_ok or(index==0 and ok)
+            results.append({"file":item.name,"package_name":package_name,"user_id":user_id,"ok":ok,"output":out or error})
+    return {"users":catalog["items"],"options":options,"results":results}
 
 def apk_push_directory(value):
     """校验设备端 APK 目录；目录末级名称将用于生成目标 APK 文件名。"""

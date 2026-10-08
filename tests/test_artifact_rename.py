@@ -45,6 +45,44 @@ class ArtifactRenameTest(unittest.TestCase):
         self.assertEqual(b"apk-content", output.read_bytes())
         self.assertFalse(source.exists())
 
+    def test_install_targets_selected_users_with_whitelisted_options(self):
+        source = self.apk_root / "example.apk"
+        source.write_bytes(b"apk")
+        catalog = {"items": [
+            {"user_id": 0, "name": "Owner", "current": True, "running": True},
+            {"user_id": 10, "name": "Guest", "current": False, "running": False},
+        ]}
+        body = {
+            "files": [str(source)],
+            "user_ids": [0, 10],
+            "options": {"replace": True, "downgrade": True, "grant_permissions": True, "test_only": False},
+        }
+
+        with patch.object(artifacts.android, "validated_user_ids", return_value=([0, 10], catalog)), patch.object(
+            artifacts, "apk_package_name", return_value="com.example.app"
+        ), patch.object(artifacts.android, "device_adb", return_value=(0, "Success", "")) as adb:
+            result = artifacts.install({}, body)
+
+        self.assertEqual([0, 10], [item["user_id"] for item in result["results"]])
+        self.assertEqual(
+            ("install", "-r", "-d", "-g", "--user", "0", str(source)),
+            adb.call_args_list[0].args[1:],
+        )
+        self.assertEqual(
+            ("install", "-r", "-d", "-g", "--user", "10", str(source)),
+            adb.call_args_list[1].args[1:],
+        )
+
+    def test_install_rejects_unknown_option_before_adb(self):
+        source = self.apk_root / "example.apk"
+        source.write_bytes(b"apk")
+        with patch.object(artifacts.android, "validated_user_ids", return_value=([0], {"items": []})), patch.object(
+            artifacts.android, "device_adb"
+        ) as adb:
+            with self.assertRaisesRegex(ValueError, "安装选项无效"):
+                artifacts.install({}, {"files": [str(source)], "user_ids": [0], "options": {"replace": True, "arbitrary": True}})
+        adb.assert_not_called()
+
     def test_rename_accepts_name_with_expected_extension(self):
         source = self.apk_root / "old.apk"
         source.write_bytes(b"apk")

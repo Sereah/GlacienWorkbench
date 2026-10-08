@@ -42,7 +42,7 @@
           <div class="apk-subpage visible" id="apk-tab-local">
             <div class="subpage-heading"><p class="page-description">用户数据目录 <code>adb-tools/apk-center/files/</code> 中的 APK：可上传、安装、删除或计算 MD5 / SHA-256。</p><div class="header-actions"><button class="button primary" onclick="openApkSourcePicker()">从构建目录导入</button><button class="button subtle" onclick="openApkSourceConfig()">配置 APK 来源</button><label class="button subtle upload-button">上传 APK<input id="apkUpload" type="file" accept=".apk,application/vnd.android.package-archive" onchange="uploadApk(this.files)"></label><button class="button subtle" id="apkRefreshButton" onclick="loadApks()">刷新列表</button></div></div>
             <div class="artifact-list" id="apkList"></div>
-            <div class="sticky-action"><span id="apkSelection">尚未选择 APK</span><button class="button primary" id="installButton" onclick="installSelected()" disabled>安装所选项</button></div>
+            <div class="sticky-action"><span id="apkSelection">尚未选择 APK</span><button class="button primary" id="installButton" onclick="openApkInstall()" disabled>安装所选项</button></div>
           </div>
           <div class="apk-subpage" id="apk-tab-sign">
             <div class="subpage-heading"><p class="page-description">选择受管签名文件、勾选 APK 后签名；密码仅用于本次操作，不会保存。</p><div class="header-actions"><label class="button subtle upload-button">上传签名文件<input id="keystoreUpload" type="file" accept=".jks,.keystore" onchange="uploadKeystore(this.files)"></label><button class="button subtle" onclick="openKeystoreManager()">管理签名文件</button><button class="button subtle" id="signRefreshButton" onclick="loadSignPage()">刷新</button></div></div>

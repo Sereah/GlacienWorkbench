@@ -93,7 +93,7 @@ signatures:[abcd]
         self.assertEqual("10101", result["uid"])
         self.assertTrue(result["enabled"])
         self.assertEqual("platform", result["signature_status"])
-        self.assertEqual([{"user_id": 0, "installed": True, "enabled_state": "0", "enabled": True, "stopped": False, "name": "Owner", "current": True}], result["users"])
+        self.assertEqual([{"user_id": 0, "installed": True, "enabled_state": "0", "enabled": True, "stopped": False, "name": "Owner", "current": True, "running": True}], result["users"])
 
     def test_details_falls_back_to_installed_android_user_for_apk_path(self):
         package_dump = """Package [com.bytedance.byteautoservice3]:
