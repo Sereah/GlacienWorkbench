@@ -58,8 +58,8 @@ def release_info() -> dict:
         if not isinstance(value, dict):
             raise ValueError("release.json 必须是对象")
     except (OSError, ValueError, json.JSONDecodeError):
-        return {"version": "0.4.1", "releases": []}
-    version = str(value.get("version", "")).strip() or "0.4.1"
+        return {"version": "0.4.2", "releases": []}
+    version = str(value.get("version", "")).strip() or "0.4.2"
     releases = []
     for item in value.get("releases", []):
         if not isinstance(item, dict):
