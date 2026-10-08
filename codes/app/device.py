@@ -23,7 +23,8 @@ RISKY_ADB_PREFIXES = (
     ("shell", "setprop"), ("shell", "rm"),
 )
 PROCESS_NAME = re.compile(r"[A-Za-z0-9_.-]+(?::[A-Za-z0-9_.-]+)?")
-THREADTIME_PID = re.compile(r"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+(\d+)\s+\d+\s+")
+THREADTIME_HEADER = re.compile(r"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+(\d+)\s+\d+\s+([VDIWEFA])\s+")
+LOG_PRIORITY_RANK = {priority: rank for rank, priority in enumerate(("V", "D", "I", "W", "E", "F"))}
 PACKAGE_VERSION_NAME = re.compile(r"^\s*versionName=(.*?)\s*$", re.MULTILINE)
 PACKAGE_VERSION_CODE = re.compile(r"^\s*versionCode=(\d+)(?:\s|$)", re.MULTILINE)
 PACKAGE_USER_STATE = re.compile(r"^\s*User (\d+):.*\binstalled=true\b", re.MULTILINE)
@@ -277,11 +278,22 @@ def normalize_log_filter(rule):
         terms=list(dict.fromkeys(str(term).strip() for term in item.get("terms",[]) if str(term).strip()))
         if not terms: continue
         terms_count+=len(terms);filters.append({"mode":item["mode"],"terms":terms})
+    included_terms={term for item in filters if item["mode"] in {"include_any","include_all"} for term in item["terms"]}
+    raw_constraints=rule.get("priority_constraints",[])
+    if not isinstance(raw_constraints,list): raise ValueError("日志规则 priority_constraints 必须是数组")
+    constraints=[];constrained_terms=set()
+    for item in raw_constraints:
+        if not isinstance(item,dict): raise ValueError("关键词级别限制格式无效")
+        term=str(item.get("term","")).strip();minimum_priority=str(item.get("minimum_priority","")).strip().upper()
+        if not term or term not in included_terms: raise ValueError(f"级别限制关键词不在包含条件中：{term or '空关键词'}")
+        if minimum_priority not in LOG_PRIORITY_RANK: raise ValueError(f"不支持的日志级别：{minimum_priority or '空级别'}")
+        if term in constrained_terms: raise ValueError(f"关键词存在重复级别限制：{term}")
+        constrained_terms.add(term);constraints.append({"term":term,"minimum_priority":minimum_priority})
     process_name=str(rule.get("process_name","") or "").strip()
     if process_name and not PROCESS_NAME.fullmatch(process_name): raise ValueError("进程名格式无效，请填写完整进程名，例如 com.example.app:service")
     if not filters: raise ValueError("日志规则必须至少包含一个整体过滤关键词")
     if len(filters)>30 or terms_count>100: raise ValueError("日志规则最多支持 30 条条件和 100 个关键词")
-    return {**rule,"filters":filters,"process_name":process_name}
+    return {**rule,"filters":filters,"priority_constraints":constraints,"process_name":process_name}
 
 def saved_log_filter(settings, name):
     """实时 Logcat 只能运行已保存规则，禁止无筛选全量流拖慢浏览器。"""
@@ -353,19 +365,35 @@ def resolve_log_process(settings, rule):
     return {"name":name,"pids":process_pids(settings,name) if name else []}
 
 def log_line_pid(line):
-    match=THREADTIME_PID.match(line)
+    match=THREADTIME_HEADER.match(line)
     return int(match.group(1)) if match else None
+
+def log_line_priority(line):
+    """解析 threadtime 的单字母级别；Assert 按 Fatal 处理。"""
+    match=THREADTIME_HEADER.match(line)
+    if not match: return None
+    priority=match.group(2)
+    return "F" if priority=="A" else priority
+
+def term_matches_with_priority(term, target, line_priority, constraints):
+    if not term_matches(term,target): return False
+    minimum_priority=constraints.get(term)
+    if not minimum_priority: return True
+    if line_priority not in LOG_PRIORITY_RANK: return False
+    return LOG_PRIORITY_RANK[line_priority]>=LOG_PRIORITY_RANK[minimum_priority]
 
 def matches(line, rule, process_ids=None):
     """连续实时筛选条件与离线日志语义一致：条件之间为 AND。"""
     if process_ids is not None and log_line_pid(line) not in process_ids: return False
     target=line.lower()
-    filters=rule.get("filters") if isinstance(rule,dict) else None
-    if not isinstance(filters,list): filters=normalize_log_filter(rule)["filters"]
+    normalized=rule if isinstance(rule,dict) and isinstance(rule.get("filters"),list) and isinstance(rule.get("priority_constraints",[]),list) else normalize_log_filter(rule)
+    filters=normalized["filters"]
+    constraints={item["term"]:item["minimum_priority"] for item in normalized.get("priority_constraints",[])}
+    priority=log_line_priority(line) if constraints else None
     for filter_data in filters:
         terms=filter_data["terms"]
-        if filter_data["mode"]=="include_all" and not all(term_matches(t,target) for t in terms): return False
-        if filter_data["mode"]=="include_any" and not any(term_matches(t,target) for t in terms): return False
+        if filter_data["mode"]=="include_all" and not all(term_matches_with_priority(t,target,priority,constraints) for t in terms): return False
+        if filter_data["mode"]=="include_any" and not any(term_matches_with_priority(t,target,priority,constraints) for t in terms): return False
         if filter_data["mode"]=="exclude_any" and any(term_matches(t,target) for t in terms): return False
     return True
 

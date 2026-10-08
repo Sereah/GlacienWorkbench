@@ -26,6 +26,9 @@ MAX_FILTERS = 30
 MAX_TERMS = 100
 QUERY_TIMEOUT_SECONDS = 300
 VALID_MODES = {"include_any", "include_all", "exclude_any"}
+LOG_PRIORITY_RANK = {priority: rank for rank, priority in enumerate(("V", "D", "I", "W", "E", "F"))}
+LOG_PRIORITY_CHARS = {"V": "VDIWEFA", "D": "DIWEFA", "I": "IWEFA", "W": "WEFA", "E": "EFA", "F": "FA"}
+THREADTIME_PRIORITY = re.compile(r"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+\d+\s+\d+\s+([VDIWEFA])\s+")
 ARCHIVE_SUFFIXES = (".tar.gz", ".tgz", ".tar", ".zip", ".gz")
 MAX_ARCHIVE_FILES = 100_000
 MAX_ARCHIVE_BYTES = 50 * 1024 * 1024 * 1024
@@ -287,23 +290,84 @@ def normalize_filters(value: object) -> list[dict]:
         raise ValueError(f"筛选关键词数量必须为 1-{MAX_TERMS}")
     return filters
 
+def normalize_priority_constraints(value: object, filters: list[dict]) -> list[dict]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("关键词级别限制必须是数组")
+    included_terms = {term for item in filters if item["mode"] in {"include_any", "include_all"} for term in item["terms"]}
+    constraints, seen = [], set()
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("关键词级别限制格式无效")
+        term = str(item.get("term", "")).strip()
+        minimum_priority = str(item.get("minimum_priority", "")).strip().upper()
+        if not term or term not in included_terms:
+            raise ValueError(f"级别限制关键词不在包含条件中：{term or '空关键词'}")
+        if minimum_priority not in LOG_PRIORITY_RANK:
+            raise ValueError(f"不支持的日志级别：{minimum_priority or '空级别'}")
+        if term in seen:
+            raise ValueError(f"关键词存在重复级别限制：{term}")
+        seen.add(term)
+        constraints.append({"term": term, "minimum_priority": minimum_priority})
+    return constraints
+
 def escape_wildcard_term(term: str) -> str:
     """将关键词转义为 PCRE，* 转为 .*，其余正则元字符转义。"""
     parts = re.split(r"\*+", term)
     return ".*".join(re.escape(p) for p in parts)
 
-def pcre_pattern(filters: list[dict]) -> str:
+def _priority_lookahead(minimum_priority: str) -> str:
+    priorities = LOG_PRIORITY_CHARS[minimum_priority]
+    return rf"(?=\d{{2}}-\d{{2}}\s+\d{{2}}:\d{{2}}:\d{{2}}\.\d+\s+\d+\s+\d+\s+[{priorities}]\s+)"
+
+def _term_lookahead(term: str, constraints: dict[str, str]) -> str:
+    priority = _priority_lookahead(constraints[term]) if term in constraints else ""
+    return priority + f"(?=.*{escape_wildcard_term(term)})"
+
+def pcre_pattern(filters: list[dict], priority_constraints: list[dict] | None = None) -> str:
     """将连续 AND 条件编码为安全的 PCRE2 lookahead，支持 * 通配符。"""
+    constraints = {item["term"]: item["minimum_priority"] for item in priority_constraints or []}
     clauses = []
     for filter_data in filters:
-        escaped = [escape_wildcard_term(term) for term in filter_data["terms"]]
+        terms = filter_data["terms"]
         if filter_data["mode"] == "include_any":
-            clauses.append(f"(?=.*(?:{'|'.join(escaped)}))")
+            alternatives = "|".join(f"(?:{_term_lookahead(term, constraints)})" for term in terms)
+            clauses.append(f"(?=(?:{alternatives}))")
         elif filter_data["mode"] == "include_all":
-            clauses.extend(f"(?=.*{term})" for term in escaped)
+            clauses.extend(_term_lookahead(term, constraints) for term in terms)
         else:
+            escaped = [escape_wildcard_term(term) for term in terms]
             clauses.append(f"(?!.*(?:{'|'.join(escaped)}))")
     return "(?i)^" + "".join(clauses) + ".*$"
+
+def _term_matches(term: str, target: str) -> bool:
+    pattern = escape_wildcard_term(term)
+    return re.search(pattern, target, re.IGNORECASE) is not None
+
+def _line_priority(line: str) -> Optional[str]:
+    match = THREADTIME_PRIORITY.match(line)
+    if not match:
+        return None
+    return "F" if match.group(1) == "A" else match.group(1)
+
+def line_matches(line: str, filters: list[dict], priority_constraints: list[dict] | None = None) -> bool:
+    constraints = {item["term"]: item["minimum_priority"] for item in priority_constraints or []}
+    priority = _line_priority(line) if constraints else None
+    def term_matches(term: str) -> bool:
+        if not _term_matches(term, line):
+            return False
+        minimum = constraints.get(term)
+        return not minimum or priority in LOG_PRIORITY_RANK and LOG_PRIORITY_RANK[priority] >= LOG_PRIORITY_RANK[minimum]
+    for filter_data in filters:
+        terms = filter_data["terms"]
+        if filter_data["mode"] == "include_any" and not any(term_matches(term) for term in terms):
+            return False
+        if filter_data["mode"] == "include_all" and not all(term_matches(term) for term in terms):
+            return False
+        if filter_data["mode"] == "exclude_any" and any(_term_matches(term, line) for term in terms):
+            return False
+    return True
 
 
 def _natural_path_key(value: object) -> tuple:
@@ -315,10 +379,11 @@ def query(settings: dict, body: dict) -> dict:
     """用 rg --json 查询受配置白名单约束的文件或目录，返回匹配行及来源行号。"""
     source_name, source = source_path(settings, body.get("source"))
     filters = normalize_filters(body.get("filters"))
+    priority_constraints = normalize_priority_constraints(body.get("priority_constraints"), filters)
     executable = rg_executable()
     if not executable:
         raise ValueError("未找到 rg（ripgrep），无法使用高速离线扫描")
-    command = [executable, "--json", "--pcre2", "--color", "never", "--hidden", "--no-ignore", "--glob", "!.git", "--glob", "!*.zip", "--glob", "!*.gz", "--glob", "!*.tgz", "--glob", "!*.tar", "--", pcre_pattern(filters), str(source)]
+    command = [executable, "--json", "--pcre2", "--color", "never", "--hidden", "--no-ignore", "--glob", "!.git", "--glob", "!*.zip", "--glob", "!*.gz", "--glob", "!*.tgz", "--glob", "!*.tar", "--", pcre_pattern(filters, priority_constraints), str(source)]
     started = time.monotonic()
     try:
         process = proc.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=QUERY_TIMEOUT_SECONDS, check=False)
@@ -339,6 +404,8 @@ def query(settings: dict, body: dict) -> dict:
         line_data = data.get("lines", {})
         file_path = path_data.get("text") or path_data.get("bytes", "")
         text = (line_data.get("text") or "").rstrip("\r\n")
+        if not line_matches(text, filters, priority_constraints):
+            continue
         if source.is_file():
             relative = source.name
         else:

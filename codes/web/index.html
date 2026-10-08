@@ -6,7 +6,7 @@
   <title>Glacien Workbench</title>
   <script>try{document.documentElement.dataset.theme=localStorage.getItem('glacien.theme')||'glacien'}catch(error){document.documentElement.dataset.theme='glacien'}</script>
   <!-- 版本参数与服务端 no-store 一起避免旧版前端脚本缓存导致页面退回初始结构。 -->
-  <link rel="stylesheet" href="/styles.css?v=20260930-102" />
+  <link rel="stylesheet" href="/styles.css?v=20261008-100" />
 </head>
 <body>
   <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
@@ -157,6 +157,6 @@
     </section>
   </main>
   <div id="liveLogSchemeControls" hidden><select id="logPreset" onchange="selectLogPreset()"><option value="" disabled selected>选择已保存方案…</option></select><button class="button subtle" type="button" onclick="newLogPreset()">新建方案</button></div>
-  <div id="toast" class="toast"></div><script src="qrc:///qtwebchannel/qwebchannel.js"></script><script src="/core/state.js?v=20260930-100"></script><script src="/core/dom.js?v=20260930-100"></script><script src="/core/api.js?v=20260930-100"></script><script src="/core/desktop.js?v=20260930-100"></script><script src="/features/audio.js?v=20260930-100"></script><script src="/features/wireless-pairing.js?v=20260930-100"></script><script src="/features/app-manager.js?v=20260930-100"></script><script src="/features/bugreports.js?v=20260930-100"></script><script src="/features/performance.js?v=20260930-100"></script><script src="/features/shell.js?v=20260930-100"></script><script src="/features/deployment-and-device.js?v=20260930-100"></script><script src="/features/workbench.js?v=20260930-100"></script><script src="/features/realtime-logs.js?v=20260930-100"></script><script src="/app.js?v=20260930-100"></script>
+  <div id="toast" class="toast"></div><script src="qrc:///qtwebchannel/qwebchannel.js"></script><script src="/core/state.js?v=20260930-100"></script><script src="/core/dom.js?v=20260930-100"></script><script src="/core/api.js?v=20260930-100"></script><script src="/core/desktop.js?v=20260930-100"></script><script src="/features/audio.js?v=20260930-100"></script><script src="/features/wireless-pairing.js?v=20260930-100"></script><script src="/features/app-manager.js?v=20260930-100"></script><script src="/features/bugreports.js?v=20260930-100"></script><script src="/features/performance.js?v=20260930-100"></script><script src="/features/shell.js?v=20260930-100"></script><script src="/features/deployment-and-device.js?v=20261008-100"></script><script src="/features/workbench.js?v=20261008-100"></script><script src="/features/realtime-logs.js?v=20261008-100"></script><script src="/app.js?v=20260930-100"></script>
   <div class="config-modal" id="configModal" hidden><div class="config-dialog"><div class="config-dialog-header"><div><p class="eyebrow">FEATURE CONFIGURATION</p><h2 id="configModalTitle">配置</h2></div><button class="icon-button" onclick="closeFeatureConfig()">×</button></div><div id="configModalBody"></div><div class="config-dialog-footer"><button class="button subtle" onclick="closeFeatureConfig()">取消</button><button class="button primary" onclick="saveFeatureConfig()">保存</button></div></div></div>
 </body></html>

@@ -76,6 +76,9 @@ saveLogPreset = async function(){
   if (!name) return toast("请填写方案名称", true);
   if (!filters) return toast("请先修正过滤表达式", true);
   if (!filters.length) return toast("请至少填写一条过滤条件", true);
+  let priorityConstraints;
+  try { priorityConstraints = priorityConstraintDraft(filters); }
+  catch(error) { return toast(error.message, true); }
   const highlights = [];
   for (const input of document.querySelectorAll("#logRulePanel .color-input input")) {
     const colorTerms = words(input.value);
@@ -83,7 +86,7 @@ saveLogPreset = async function(){
   }
   if (state.logs) stopLogs();
   // 保留旧规则中的未知字段与 process_name；新进程筛选仅作为本次监听参数。
-  const savedRule = {...(activeLogFilters()[name] || {}), filters, highlights};
+  const savedRule = {...(activeLogFilters()[name] || {}), filters, priority_constraints: priorityConstraints, highlights};
   state.config.log_filters = {...(state.config.log_filters || {}), [name]: savedRule};
   try {
     await api("/api/config", {method:"POST", body:JSON.stringify(state.config)});

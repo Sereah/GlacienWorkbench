@@ -233,11 +233,26 @@ function updateLogFontSize(value){localStorage.setItem('glacien.log.fontSize',va
 function updateLogHighlightOpacity(value){localStorage.setItem('glacien.log.highlightOpacity',value);applyLogViewSettings()}
 function words(value){return [...new Set(value.replaceAll(String.fromCharCode(13),',').replaceAll(String.fromCharCode(10),',').split(',').map(x=>x.trim()).filter(Boolean))]}
 function activeLogFilters(){return state.config?.log_filters||{}}
+const logPriorityOptions=[['D','调试及以上（D/I/W/E/F）'],['I','信息及以上（I/W/E/F）'],['W','警告及以上（W/E/F）'],['E','错误及以上（E/F）'],['F','严重错误（F）']];
+function priorityEligibleTerms(filters=[]){return [...new Set(filters.filter(filter=>filter.mode!=='exclude_any').flatMap(filter=>filter.terms||[]))]}
+function priorityConstraintDraft(filters,rowsSelector='#logPriorityRows .log-priority-row'){
+  const allowed=new Set(priorityEligibleTerms(filters)),seen=new Set(),constraints=[];
+  for(const row of $$(rowsSelector)){
+    const term=row.querySelector('.log-priority-term').value,minimum_priority=row.querySelector('.log-priority-level').value;
+    if(!term)continue;
+    if(!allowed.has(term))throw new Error('级别限制关键词已不在包含条件中：'+term);
+    if(!logPriorityOptions.some(([value])=>value===minimum_priority))throw new Error('请选择有效的最低日志级别：'+term);
+    if(seen.has(term))throw new Error('关键词存在重复级别限制：'+term);
+    seen.add(term);constraints.push({term,minimum_priority});
+  }
+  return constraints;
+}
 function logRulePayload(){
-  const name=$('#logRuleName')?.value.trim()||'',raw=$('#logRuleTerms')?.value||'',highlights={};let filters=[],error='';
+  const name=$('#logRuleName')?.value.trim()||'',raw=$('#logRuleTerms')?.value||'',highlights={};let filters=[],priority_constraints=[],error='';
   if(raw.trim()){try{filters=parseLogFilterExpression(raw)}catch(exception){error=exception.message}}
+  if(!error){try{priority_constraints=priorityConstraintDraft(filters)}catch(exception){error=exception.message}}
   for(const input of document.querySelectorAll('#logRulePanel [data-color]')){const terms=words(input.value);if(terms.length)highlights[input.dataset.color]=terms;}
-  return {name,filters,highlights,error,raw:error?raw:''};
+  return {name,filters,priority_constraints,highlights,error,raw:error?raw:''};
 }
 function logRuleSignature(payload=logRulePayload()){return JSON.stringify(payload)}
 function logRuleDirty(){return Boolean(state.logPreset.baseline)&&logRuleSignature()!==state.logPreset.baseline}
@@ -259,7 +274,7 @@ function logFilterRegex(term){const slash=String.fromCharCode(92);return String(
 function shellQuote(value){return "'"+String(value).replaceAll("'","'\"'\"'")+"'"}
 function logFilterCommandStage(tool,pattern,exclude=false){if(tool==='rg')return 'rg -i '+(exclude?'-v ':'')+'-e '+shellQuote(pattern);return 'grep -Ei '+(exclude?'-v ':'')+'-- '+shellQuote(pattern)}
 function formatLogFilterCommand(filters,tool){const stages=[];for(const filter of filters){const patterns=filter.terms.map(logFilterRegex);if(filter.mode==='include_all'){patterns.forEach(pattern=>stages.push(logFilterCommandStage(tool,pattern)));continue}stages.push(logFilterCommandStage(tool,patterns.join('|'),filter.mode==='exclude_any'));}return stages.join(' | ')}
-async function copyLogFilterCommand(scope,tool){let filters;try{filters=scope==='offline'?parseOfflineExpression():logFilterDraft()}catch(error){return toast('请先修正过滤表达式：'+error.message,true)}if(!filters.length)return toast('请先填写筛选条件',true);const copied=await copyTextToClipboard(formatLogFilterCommand(filters,tool));toast(copied?(tool==='rg'?'rg':'grep')+' 筛选命令已复制，可接在 adb logcat 或 cat 输出后':'复制失败，请确认系统允许应用访问剪贴板',!copied)}
+async function copyLogFilterCommand(scope,tool){let filters;try{filters=scope==='offline'?parseOfflineExpression():logFilterDraft()}catch(error){return toast('请先修正过滤表达式：'+error.message,true)}if(!filters.length)return toast('请先填写筛选条件',true);const copied=await copyTextToClipboard(formatLogFilterCommand(filters,tool)),constraintSelector=scope==='offline'?'#offlinePriorityRows .log-priority-row':'#logPriorityRows .log-priority-row',hasPriorityConstraints=$$(constraintSelector).length>0;toast(copied?(tool==='rg'?'rg':'grep')+' 筛选命令已复制，可接在 adb logcat 或 cat 输出后'+(hasPriorityConstraints?'；命令不包含 Logcat 专属的关键词级别限制':''):'复制失败，请确认系统允许应用访问剪贴板',!copied)}
 function logFilterDraft(){return parseLogFilterExpression($('#logRuleTerms').value)}
 function createLogFilterRow(filter={},options={}){const row=document.createElement('div');row.className='log-condition-row '+(options.extraClass||'');const mode=document.createElement('select');mode.className='log-condition-mode';mode.innerHTML='<option value="include_any">包含任一</option><option value="include_all">包含全部</option><option value="exclude_any">排除任一</option>';mode.value=filter.mode||'include_any';const input=document.createElement('input');input.className='log-condition-terms';input.value=Array.isArray(filter.terms)?filter.terms.join(', '):filter.terms||'';input.placeholder='关键词，逗号分隔；* 匹配任意字符';const remove=document.createElement('button');remove.type='button';remove.className='icon-button log-condition-remove';remove.textContent='×';remove.title='移除条件';mode.onchange=input.oninput=options.onChange||null;remove.onclick=()=>options.onRemove?.(row);row.append(mode,input,remove);return row}
 function createLogHighlightSection(id,title,description,content){const section=document.createElement('section');section.id=id;section.className='log-highlight-section';const header=document.createElement('div');header.className='log-highlight-header';const label=document.createElement('span'),heading=document.createElement('b'),hint=document.createElement('small');heading.textContent=title;hint.textContent=description;label.append(heading,hint);header.append(label);content.classList.add('log-highlight-content');section.append(header);return section}
@@ -268,6 +283,24 @@ function renderRealtimeFilterRows(filters){const rows=$('#realtimeFilterRows');i
 function realtimeFilterRows(){return $$('.realtime-filter-row').map(row=>({mode:row.querySelector('.log-condition-mode').value,terms:words(row.querySelector('.log-condition-terms').value)})).filter(filter=>filter.terms.length)}
 function syncRealtimeFiltersFromRows(){const filters=realtimeFilterRows();$('#logRuleTerms').value=filters.length?formatLogFilterExpression(filters):'';updateLogFilterEditor(false)}
 function addRealtimeFilter(filter){const rows=$('#realtimeFilterRows');if(!rows)return;rows.append(realtimeFilterRow(filter));rows.lastElementChild.querySelector('input').focus();syncRealtimeFiltersFromRows()}
+function priorityConstraintRow(constraint={}){
+  const row=document.createElement('div');row.className='log-priority-row';
+  const term=document.createElement('select');term.className='log-priority-term';
+  const filters=$('#logRuleTerms')?.value.trim()?logFilterDraft():[],terms=priorityEligibleTerms(filters),selected=String(constraint.term||'');
+  term.innerHTML='<option value="">选择包含关键词…</option>'+terms.map(value=>'<option value="'+escapeHtml(value)+'">'+escapeHtml(value)+'</option>').join('');
+  if(selected&&!terms.includes(selected))term.insertAdjacentHTML('beforeend','<option value="'+escapeHtml(selected)+'" disabled>'+escapeHtml(selected)+'（已不在包含条件中）</option>');
+  term.value=selected;
+  const level=document.createElement('select');level.className='log-priority-level';level.innerHTML=logPriorityOptions.map(([value,label])=>'<option value="'+value+'">'+label+'</option>').join('');level.value=String(constraint.minimum_priority||'E').toUpperCase();
+  const remove=document.createElement('button');remove.type='button';remove.className='icon-button';remove.textContent='×';remove.title='移除级别限制';remove.onclick=()=>{row.remove();refreshLogRuleState()};
+  term.onchange=level.onchange=refreshLogRuleState;row.append(term,level,remove);return row;
+}
+function renderPriorityConstraints(constraints=[]){const rows=$('#logPriorityRows');if(!rows)return;rows.replaceChildren();constraints.forEach(item=>rows.append(priorityConstraintRow(item)));}
+function addPriorityConstraint(){
+  let filters;try{filters=logFilterDraft()}catch(error){return toast('请先修正过滤表达式：'+error.message,true)}
+  const used=new Set($$('#logPriorityRows .log-priority-term').map(select=>select.value)),term=priorityEligibleTerms(filters).find(value=>!used.has(value));
+  if(!term)return toast('没有可添加的包含关键词，或所有关键词都已设置级别限制',true);
+  const rows=$('#logPriorityRows'),row=priorityConstraintRow({term,minimum_priority:'E'});rows.append(row);refreshLogRuleState();row.querySelector('.log-priority-term').focus();
+}
 function updateLogFilterEditor(renderRows=true){
   const expression=$('#logRuleTerms'),error=$('#logFilterExpressionError'),status=$('#logFilterExpressionStatus'),summary=$('#logFilterBasicSummary'),count=$('#logFilterKeywordCount');if(!expression)return;
   if(!expression.value.trim()){const empty=[];if(error){error.textContent='';error.hidden=true;}if(status)status.textContent='尚未填写表达式';if(summary)summary.textContent='添加条件后即可保存方案';if(count)count.textContent='0 条条件';if(renderRows)renderRealtimeFilterRows(empty);refreshLogRuleState();return empty;}
@@ -282,6 +315,7 @@ function ensureLogFilterDualEditor(){
   const nameField=document.createElement('label');nameField.className='log-rule-name-field';const nameLabel=document.createElement('span');nameLabel.textContent='规则名称';name.before(nameField);nameField.append(nameLabel,name);
   const editor=document.createElement('section');editor.id='logFilterEditor';editor.className='log-filter-builder log-filter-editor';editor.innerHTML='<header class="log-filter-builder-header log-filter-editor-header"><div><b>筛选条件</b><small>每条条件都必须满足；后加条件继续缩小结果</small></div><div class="log-filter-mode-tabs"><button class="log-filter-mode-button active" data-mode="basic" type="button">基础模式</button><button class="log-filter-mode-button" data-mode="expression" type="button">表达式模式</button></div></header><div id="logFilterBasicMode" class="log-filter-builder-body log-filter-basic"><div class="log-filter-basic-meta"><span class="log-filter-match-badge" id="logFilterKeywordCount">0 条条件</span><span id="logFilterBasicSummary">添加条件后即可保存方案</span></div><div id="realtimeFilterRows" class="log-condition-rows realtime-filter-rows"></div><button class="button subtle realtime-filter-add" type="button">＋ 添加条件</button></div><div id="logFilterExpressionMode" class="log-filter-builder-body log-filter-expression" hidden><label><span>QUERY</span></label><div class="log-filter-expression-help"><span><code>(a | b)</code> 包含任一</span><span><code>(a &amp; b)</code> 包含全部</span><span><code>!(a | b)</code> 排除任一</span><span>条件之间用 <code>&amp;</code></span></div><div class="log-filter-copy-actions"><button class="button subtle" type="button" onclick="copyLogFilterCommand(\'realtime\',\'grep\')">复制为 grep</button><button class="button subtle" type="button" onclick="copyLogFilterCommand(\'realtime\',\'rg\')">复制为 rg</button></div><p id="logFilterExpressionStatus" class="log-filter-expression-status"></p><p id="logFilterExpressionError" class="log-filter-expression-error" hidden></p></div>';
   ruleMain.append(editor);$('#logFilterExpressionMode label').append(terms);$$('.log-filter-mode-button').forEach(button=>button.onclick=()=>showLogFilterMode(button.dataset.mode));$('.realtime-filter-add').onclick=()=>addRealtimeFilter();
+  const priority=document.createElement('section');priority.id='logPrioritySection';priority.className='log-priority-section';priority.innerHTML='<header><span><b>关键词级别限制</b><small>可选：只限制指定关键词，其他关键词仍匹配全部日志级别</small></span><button class="button subtle" type="button">＋ 添加限制</button></header><div id="logPriorityRows" class="log-priority-rows"></div>';editor.after(priority);priority.querySelector('button').onclick=addPriorityConstraint;
   const colors=$('.color-grid');if(colors&&!$('#logHighlightSection')){const section=createLogHighlightSection('logHighlightSection','高亮规则','可选：为日志内容中的任意字符串设置颜色',colors);colors.before(section);section.append(colors);}
   const actions=$('.rule-actions');if(actions&&!$('#logRuleDraftState')){const draft=document.createElement('span');draft.id='logRuleDraftState';draft.className='log-rule-draft-state';actions.prepend(draft);}name.addEventListener('input',refreshLogRuleState);$$('#logs [data-color]').forEach(input=>input.addEventListener('input',refreshLogRuleState));
   showLogFilterMode('basic');
@@ -298,7 +332,7 @@ function openLogKeywordManager(){
 function applyLogKeywordManager(){
   const terms=[...new Set($$('.log-keyword-input').map(input=>input.value.trim()).filter(Boolean))];if(!terms.length)return toast('请至少添加一个关键词',true);const mode=$('#logKeywordMode').value;$('#logRuleTerms').value=formatLogFilterExpression(mode,terms);$('#logMatchMode').value=mode;closeFeatureConfig();updateLogFilterEditor();showLogFilterMode('basic');
 }
-function fillLogEditor(name=''){const rule=activeLogFilters()[name]||{},filters=normalizeRealtimeFilters(rule);$('#logRuleName').value=name;$('#logRuleTerms').value=filters.length?formatLogFilterExpression(filters):'';const grouped=Object.fromEntries(logColors.map(color=>[color,[]]));for(const group of rule.highlights||[]){if(grouped[group.color])grouped[group.color].push(...(group.terms||[]));}document.querySelectorAll('#logRulePanel .color-input input').forEach(input=>input.value=(grouped[input.dataset.color]||[]).join(', '));updateLogFilterEditor();setLogRuleBaseline(name);}
+function fillLogEditor(name=''){const rule=activeLogFilters()[name]||{},filters=normalizeRealtimeFilters(rule);$('#logRuleName').value=name;$('#logRuleTerms').value=filters.length?formatLogFilterExpression(filters):'';renderPriorityConstraints(Array.isArray(rule.priority_constraints)?rule.priority_constraints:[]);const grouped=Object.fromEntries(logColors.map(color=>[color,[]]));for(const group of rule.highlights||[]){if(grouped[group.color])grouped[group.color].push(...(group.terms||[]));}document.querySelectorAll('#logRulePanel .color-input input').forEach(input=>input.value=(grouped[input.dataset.color]||[]).join(', '));updateLogFilterEditor();setLogRuleBaseline(name);}
 async function loadLogFilters(){try{const filters=await api('/api/log-filters');const select=$('#logPreset'),current=select.value;select.innerHTML='<option value="">全部日志</option>'+Object.keys(filters).map(name=>`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');select.value=Object.prototype.hasOwnProperty.call(filters,current)?current:'';fillLogEditor(select.value);}catch(e){toast(e.message,true)}}
 function ensureLogExportButtons(){if($('#logViewControls'))return;const controls=document.createElement('div');controls.id='logViewControls';controls.className='log-view-controls';controls.innerHTML='<label>字体 <input id="logFontSize" type="range" min="11" max="22" step="1" oninput="updateLogFontSize(this.value)"><b id="logFontSizeValue">13px</b></label><label>高亮背景 <input id="logHighlightOpacity" type="range" min="10" max="100" step="5" oninput="updateLogHighlightOpacity(this.value)"><b id="logHighlightOpacityValue">100%</b></label><button class="button subtle" id="logExportButton" onclick="exportLogs()" disabled>导出结果</button>';$('#logStatus').before(controls);applyLogViewSettings();}
 function ensurePresetDeleteButtons(){const logControls=$('#logPreset')?.parentElement;if(logControls&&!$('#deleteLogPresetButton')){const b=document.createElement('button');b.id='deleteLogPresetButton';b.className='button danger subtle-delete';b.textContent='删除方案';b.onclick=deleteLogPreset;logControls.insertBefore(b,$('#logToggle'));}const broadcastControls=$('#broadcastPreset')?.parentElement;if(broadcastControls&&!$('#deleteBroadcastPresetButton')){const b=document.createElement('button');b.id='deleteBroadcastPresetButton';b.className='button danger subtle-delete';b.textContent='删除预设';b.onclick=deleteBroadcastPreset;broadcastControls.insertBefore(b,broadcastControls.querySelector('.button.primary'));}}

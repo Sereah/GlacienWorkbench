@@ -69,5 +69,49 @@ class DeviceProcessesTest(unittest.TestCase):
         self.assertEqual("", cleared["process_name"])
         self.assertEqual("com.legacy.app", settings["log_filters"]["voice"]["process_name"])
 
+    def test_keyword_priority_constraint_does_not_limit_other_terms(self):
+        rule = device.normalize_log_filter({
+            "filters": [{"mode": "include_any", "terms": ["normal", "noisy"]}],
+            "priority_constraints": [{"term": "noisy", "minimum_priority": "E"}],
+        })
+
+        self.assertTrue(device.matches("10-08 12:34:56.789  123  456 I Tag: normal message", rule))
+        self.assertFalse(device.matches("10-08 12:34:56.789  123  456 I Tag: noisy message", rule))
+        self.assertTrue(device.matches("10-08 12:34:56.789  123  456 E Tag: noisy message", rule))
+        self.assertTrue(device.matches("10-08 12:34:56.789  123  456 F Tag: noisy message", rule))
+
+    def test_unrestricted_term_keeps_line_that_also_contains_limited_term(self):
+        rule = device.normalize_log_filter({
+            "filters": [{"mode": "include_any", "terms": ["normal", "noisy"]}],
+            "priority_constraints": [{"term": "noisy", "minimum_priority": "E"}],
+        })
+
+        self.assertTrue(device.matches("10-08 12:34:56.789  123  456 I Tag: normal noisy", rule))
+
+    def test_warning_constraint_accepts_warning_and_above(self):
+        rule = device.normalize_log_filter({
+            "filters": [{"mode": "include_any", "terms": ["heartbeat"]}],
+            "priority_constraints": [{"term": "heartbeat", "minimum_priority": "W"}],
+        })
+
+        self.assertFalse(device.matches("10-08 12:34:56.789  123  456 I Tag: heartbeat", rule))
+        self.assertTrue(device.matches("10-08 12:34:56.789  123  456 W Tag: heartbeat", rule))
+        self.assertTrue(device.matches("10-08 12:34:56.789  123  456 E Tag: heartbeat", rule))
+
+    def test_priority_constraint_requires_an_included_term(self):
+        with self.assertRaisesRegex(ValueError, "级别限制关键词不在包含条件中"):
+            device.normalize_log_filter({
+                "filters": [{"mode": "include_any", "terms": ["normal"]}],
+                "priority_constraints": [{"term": "missing", "minimum_priority": "E"}],
+            })
+
+    def test_legacy_log_rule_has_no_priority_constraints(self):
+        rule = device.normalize_log_filter({
+            "filters": [{"mode": "include_any", "terms": ["legacy"]}],
+        })
+
+        self.assertEqual([], rule["priority_constraints"])
+        self.assertTrue(device.matches("10-08 12:34:56.789  123  456 D Tag: legacy", rule))
+
 if __name__ == "__main__":
     unittest.main()

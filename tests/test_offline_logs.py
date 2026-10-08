@@ -1,6 +1,7 @@
 import gzip
 import io
 import json
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -99,6 +100,72 @@ class OfflineLogArchiveTest(unittest.TestCase):
             [("android_log.2", 3), ("android_log.2", 9), ("android_log.10", 20)],
             [(item["file"], item["line"]) for item in result["results"]],
         )
+
+    def test_query_applies_priority_only_to_configured_keyword(self):
+        log_file = self.source / "single.log"
+        log_file.write_text("placeholder\n", encoding="utf-8")
+
+        def event(line, text):
+            return json.dumps({
+                "type": "match",
+                "data": {
+                    "path": {"text": str(log_file)},
+                    "lines": {"text": text + "\n"},
+                    "line_number": line,
+                },
+            })
+
+        output = "\n".join([
+            event(1, "10-08 12:34:56.789  123  456 I Tag: noisy"),
+            event(2, "10-08 12:34:56.789  123  456 I Tag: normal"),
+            event(3, "10-08 12:34:56.789  123  456 E Tag: noisy"),
+        ])
+        completed = subprocess.CompletedProcess([], 0, output, "")
+        body = {
+            "source": "single",
+            "filters": [{"mode": "include_any", "terms": ["normal", "noisy"]}],
+            "priority_constraints": [{"term": "noisy", "minimum_priority": "E"}],
+        }
+
+        with patch.object(logs, "rg_executable", return_value="/usr/bin/rg"), \
+                patch.object(logs.proc, "run", return_value=completed) as run:
+            result = logs.query(
+                {"offline_log_sources": {"single": str(log_file)}},
+                body,
+            )
+
+        self.assertEqual([2, 3], [item["line"] for item in result["results"]])
+        self.assertIn("[EFA]", run.call_args.args[0][-2])
+
+    def test_priority_constraint_requires_included_keyword(self):
+        filters = logs.normalize_filters([{"mode": "include_any", "terms": ["normal"]}])
+
+        with self.assertRaisesRegex(ValueError, "级别限制关键词不在包含条件中"):
+            logs.normalize_priority_constraints(
+                [{"term": "missing", "minimum_priority": "E"}],
+                filters,
+            )
+
+    def test_line_without_threadtime_header_cannot_satisfy_limited_keyword(self):
+        filters = logs.normalize_filters([{"mode": "include_any", "terms": ["noisy"]}])
+        constraints = logs.normalize_priority_constraints(
+            [{"term": "noisy", "minimum_priority": "E"}],
+            filters,
+        )
+
+        self.assertFalse(logs.line_matches("noisy without logcat header", filters, constraints))
+
+    def test_priority_pcre_keeps_unrestricted_keyword_and_limits_noisy_keyword(self):
+        filters = logs.normalize_filters([{"mode": "include_any", "terms": ["normal", "noisy"]}])
+        constraints = logs.normalize_priority_constraints(
+            [{"term": "noisy", "minimum_priority": "E"}],
+            filters,
+        )
+        pattern = logs.pcre_pattern(filters, constraints)
+
+        self.assertIsNotNone(re.search(pattern, "10-08 12:34:56.789  123  456 I Tag: normal"))
+        self.assertIsNone(re.search(pattern, "10-08 12:34:56.789  123  456 I Tag: noisy"))
+        self.assertIsNotNone(re.search(pattern, "10-08 12:34:56.789  123  456 E Tag: noisy"))
 
     def test_extracts_gzip_into_archive_directory_and_skips_conflict(self):
         archive = self.source / "system.log.gz"

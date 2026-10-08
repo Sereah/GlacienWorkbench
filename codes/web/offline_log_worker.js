@@ -1,5 +1,7 @@
 /* 离线日志 Worker：分块扫描 File，避免将完整 runlog 常驻主线程内存。 */
 let cancelled = false;
+const priorityRank = { V: 0, D: 1, I: 2, W: 3, E: 4, F: 5 };
+const threadtimePriority = /^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+\d+\s+\d+\s+([VDIWEFA])\s+/;
 
 function termMatches(term, target) {
   const lower = term.toLowerCase();
@@ -21,16 +23,29 @@ function termMatches(term, target) {
   return true;
 }
 
-function matches(line, filters) {
+function linePriority(line) {
+  const match = threadtimePriority.exec(line);
+  if (!match) return null;
+  return match[1] === 'A' ? 'F' : match[1];
+}
+
+function matches(line, filters, priorityConstraints = []) {
   const target = line.toLowerCase();
+  const constraints = new Map(priorityConstraints.map((item) => [item.term, item.minimum_priority]));
+  const priority = constraints.size ? linePriority(line) : null;
+  const includedTermMatches = (term) => {
+    if (!termMatches(term, target)) return false;
+    const minimum = constraints.get(term);
+    return !minimum || priority in priorityRank && priorityRank[priority] >= priorityRank[minimum];
+  };
   return filters.every((filter) => {
-    if (filter.mode === 'include_all') return filter.terms.every((term) => termMatches(term, target));
+    if (filter.mode === 'include_all') return filter.terms.every(includedTermMatches);
     if (filter.mode === 'exclude_any') return !filter.terms.some((term) => termMatches(term, target));
-    return filter.terms.some((term) => termMatches(term, target));
+    return filter.terms.some(includedTermMatches);
   });
 }
 
-async function scanFile(fileInfo, filters, progress) {
+async function scanFile(fileInfo, filters, priorityConstraints, progress) {
   const reader = fileInfo.file.stream().getReader();
   const decoder = new TextDecoder('utf-8');
   let prefix = new Uint8Array(0), remainder = '', lineNumber = 0, matchesBatch = [];
@@ -54,7 +69,7 @@ async function scanFile(fileInfo, filters, progress) {
       remainder = lines.pop();
       for (const line of lines) {
         lineNumber += 1;
-        if (matches(line, filters)) {
+        if (matches(line, filters, priorityConstraints)) {
           matchesBatch.push({ file: fileInfo.name, line: lineNumber, text: line });
           if (matchesBatch.length >= 500) flush();
         }
@@ -71,7 +86,7 @@ async function scanFile(fileInfo, filters, progress) {
       const line = remainder + tail;
       if (line) {
         lineNumber += 1;
-        if (matches(line, filters)) matchesBatch.push({ file: fileInfo.name, line: lineNumber, text: line });
+        if (matches(line, filters, priorityConstraints)) matchesBatch.push({ file: fileInfo.name, line: lineNumber, text: line });
       }
     }
     flush();
@@ -92,7 +107,7 @@ self.onmessage = async ({ data }) => {
     const files = [...data.files].sort((left, right) => collator.compare(left.name, right.name));
     for (const fileInfo of files) {
       if (cancelled) break;
-      const result = await scanFile(fileInfo, data.filters, progress);
+      const result = await scanFile(fileInfo, data.filters, data.priority_constraints || [], progress);
       if (result.binary) skipped += 1;
       progress.filesDone += 1;
       postMessage({ type: 'progress', ...progress, skipped });
