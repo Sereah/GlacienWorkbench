@@ -26,6 +26,7 @@ PROCESS_NAME = re.compile(r"[A-Za-z0-9_.-]+(?::[A-Za-z0-9_.-]+)?")
 THREADTIME_PID = re.compile(r"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+(\d+)\s+\d+\s+")
 PACKAGE_VERSION_NAME = re.compile(r"^\s*versionName=(.*?)\s*$", re.MULTILINE)
 PACKAGE_VERSION_CODE = re.compile(r"^\s*versionCode=(\d+)(?:\s|$)", re.MULTILINE)
+PACKAGE_USER_STATE = re.compile(r"^\s*User (\d+):.*\binstalled=true\b", re.MULTILINE)
 
 def adb_commands(settings):
     """返回当前功能配置的自定义 ADB 命令，配置内容不携带 adb 可执行路径。"""
@@ -126,13 +127,39 @@ def processes(settings):
         result.append({"package":package,"pid":row.split()[1] if row and len(row.split())>1 else None,"running":bool(row),"signature":"","signature_status":"not_checked","version_name":"","version_code":"","launch_configured":package in launch_configs(settings)})
     return result
 
-def installed_apk_certificate_sha256(settings, package):
-    """临时 Pull 已安装包的 base.apk，并复用 apksigner 解析证书 SHA-256。"""
+def installed_apk_paths(settings, package, package_dump=""):
+    """解析已安装 APK 路径；当包只安装在非当前 Android 用户时按用户回退查询。"""
     if not package or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._" for char in package):
         raise ValueError("非法包名")
-    code,output,error=android.device_adb(settings,"shell","pm","path",package,timeout=30)
-    if code: raise ValueError(error or output or f"无法读取 {package} 的 APK 路径")
-    paths=[line[len("package:"):].strip() for line in output.splitlines() if line.strip().startswith("package:") and line.strip()[len("package:"):].strip().startswith("/") and line.strip()[len("package:"):].strip().endswith(".apk")]
+
+    def query(*args):
+        code, output, error = android.device_adb(settings, "shell", "pm", "path", *args, timeout=30)
+        paths = [
+            line[len("package:"):].strip()
+            for line in output.splitlines()
+            if line.strip().startswith("package:") and line.strip()[len("package:"):].strip().startswith("/")
+        ]
+        return code, paths, error or output
+
+    code, paths, message = query(package)
+    if code == 0 and paths:
+        return paths
+
+    dump = package_dump
+    if not dump:
+        dump_code, dump, dump_error = android.device_adb(settings, "shell", "dumpsys", "package", package, timeout=45)
+        if dump_code:
+            raise ValueError(dump_error or dump or message or f"无法读取 {package} 的 APK 路径")
+    for user_id in PACKAGE_USER_STATE.findall(dump):
+        user_code, user_paths, user_message = query("--user", user_id, package)
+        if user_code == 0 and user_paths:
+            return user_paths
+        message = user_message or message
+    raise ValueError(message or f"无法读取 {package} 的 APK 路径")
+
+def installed_apk_certificate_sha256(settings, package):
+    """临时 Pull 已安装包的 base.apk，并复用 apksigner 解析证书 SHA-256。"""
+    paths=[path for path in installed_apk_paths(settings,package) if path.endswith(".apk")]
     if not paths: raise ValueError(f"未找到 {package} 的已安装 APK 路径")
     base=next((path for path in paths if path.rsplit("/",1)[-1]=="base.apk"),paths[0])
     with tempfile.TemporaryDirectory(prefix="glacien-cert-") as temporary:
@@ -184,15 +211,24 @@ def _launch_args(command):
         raise ValueError("拉起命令不能包含 Shell 管道、重定向或命令替换")
     return args
 
-def launch(settings, package):
+def launch(settings, package, user_id=None):
     """执行用户为该包显式保存的受限 `am start` 设备端命令。"""
     config = launch_configs(settings).get(package)
     if not isinstance(config, dict):
         raise ValueError(f"未配置 {package} 的拉起命令")
     # adb shell 最终仍由设备端 Shell 解释；逐参数引用后作为单条命令传入，避免参数中的特殊字符变成额外命令。
-    args = ["shell", shlex.join(_launch_args(config.get("command")))]
+    command_args = _launch_args(config.get("command"))
+    if user_id is not None:
+        if "--user" in command_args:
+            user_index = command_args.index("--user")
+            if user_index + 1 >= len(command_args):
+                raise ValueError("拉起命令的 --user 缺少 User ID")
+            command_args[user_index + 1] = str(user_id)
+        else:
+            command_args[2:2] = ["--user", str(user_id)]
+    args = ["shell", shlex.join(command_args)]
     code, output, error = android.device_adb(settings, *args, timeout=30)
-    return {"ok": code == 0, "output": output or error, "command": ["adb", "-s", settings["_selected_adb_serial"], *args]}
+    return {"ok": code == 0, "output": output or error, "command": ["adb", "-s", settings["_selected_adb_serial"], *args], "user_id": user_id}
 
 def broadcasts(settings):
     """返回当前配置文件中的广播预设。"""

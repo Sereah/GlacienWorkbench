@@ -13,9 +13,11 @@
 - ADB 首页的 Root/Remount 状态只通过对应操作按钮展示，不在下方设备信息卡重复显示。设备重启使用经过 serial 校验的 adb -s <serial> reboot，前端必须二次确认、停止当前 Logcat，并由现有状态轮询跟踪设备离线和恢复。
 - 多设备时，ADB 首页选择的序列号只保存在浏览器本地；`android.selected_device_settings()` 必须先在当前 `adb devices` 结果中验证它是 `device` 状态，随后 `android.device_adb()` 强制添加 `-s <serial>`。没有选择时只有恰好一台已授权设备可自动采用；两台及以上必须拒绝设备操作，不能退回第一台。
 - `app/device.py` 负责进程、平台签名比较、拉起/停止和广播。
-- `app/app_manager.py` 负责全量应用列表、按需详情、启停、清除数据、启用/禁用和 Pull APK。应用列表只使用批量命令，不允许为每个包逐一执行 `dumpsys package`；完整详情只在用户展开单个应用时读取。
-- 应用管理与关注应用复用 `app_manager.py` 返回的同一份设备应用快照和同一种卡片；关注应用合并 `watched_packages` 手动星标与 `process_package_keywords` 关键词规则，不再建立第二条 ADB 刷新链路。版本和平台签名在用户打开统一详情页时读取，证书 SHA-256 在详情页按需计算。
-- 已安装包的签名证书 SHA-256 使用 `pm path` 选择 `base.apk`，Pull 到 `TemporaryDirectory` 后复用本机 `apksigner` 验签；成功或失败都必须清理临时 APK。严格验签失败时继续兼容仅 v2/v3/v3.1 签名的 APK，但必须返回旧系统兼容性警告。`dumpsys package` 的 `signatures:[xxxxxxxx]` 是短摘要，不是完整证书 SHA-256。
+- `app/app_manager.py` 负责全量应用列表、按需详情、启停、清除数据、启用/禁用和 Pull APK。应用列表只使用批量命令，不允许为每个包逐一执行 `dumpsys package`；`pm list packages -f -U` 的 UID 字段必须兼容多用户设备返回的逗号分隔值。完整详情只在用户展开单个应用时读取。
+- 应用管理与关注应用复用 `app_manager.py` 返回的同一份设备应用快照和同一种卡片；关注应用合并 `watched_packages` 手动星标与 `process_package_keywords` 关键词规则，不再建立第二条 ADB 刷新链路。列表卡片和详情页都将 `pm list packages -U` 的安装 UID 与 `ps` 的运行实例分开展示，每个运行实例保留 `USER / UID / PID / NAME` 的完整对应。版本和平台签名在用户打开统一详情页时读取，证书 SHA-256 在详情页按需计算。
+- 启动、强制停止、清除数据、启用/禁用和卸载必须携带明确的 `user_id`，后端通过 `dumpsys package` 验证该包确实安装在目标 User。“停止所有运行 User”只根据当前 `ps` 结果逐 User 执行 `am force-stop --user`，必须二次确认；不提供默认的全 User 清数据或卸载。
+- User 级启动、停止、清数据和启禁用操作完成后必须原地刷新详情，不关闭弹窗。按 User 卸载后仅当后端确认已无剩余安装 User 时关闭详情；否则保留弹窗并刷新 User 列表。Pull APK、证书查询和特殊拉起配置不关闭详情。
+- 已安装包的详情、Pull APK 和签名证书 SHA-256 共用 APK 路径查询；默认 `pm path` 失败时，必须根据 `dumpsys package` 中 `installed=true` 的 Android 用户逐一使用 `pm path --user` 回退查询。证书查询选择 `base.apk` Pull 到 `TemporaryDirectory` 后复用本机 `apksigner` 验签；成功或失败都必须清理临时 APK。严格验签失败时继续兼容仅 v2/v3/v3.1 签名的 APK，但必须返回旧系统兼容性警告。`dumpsys package` 的 `signatures:[xxxxxxxx]` 是短摘要，不是完整证书 SHA-256。
 - 默认启动通过 `cmd package resolve-activity --brief` 自动解析 Launcher Activity。没有 Launcher 或需要指定 Activity、Action、Extras 时，可在统一应用详情中配置 `app_launches.<package>.command`；用户只填写 `adb shell` 后的设备端命令。后端用 `shlex.split()` 解析并通过 ADB 参数数组执行，只允许 `am start` 或 `am start-activity`，不接受 Shell 管道、重定向或命令替换。processes schema v2 会把旧版 action/component/activity/extras 自动迁移为等价命令。
 - Component 必须是 `包名/Activity` 完整形式。
 - 广播使用参数数组构造 `am broadcast`，不要拼接 shell 字符串。

@@ -30,16 +30,37 @@ function applicationSignatureMeta(packageName) {
   return {label, resolved: true};
 }
 
+function applicationProcessMeta(item, userId = null) {
+  const processes = (Array.isArray(item.processes) ? item.processes : []).filter(process => userId === null || Number(process.user_id) === Number(userId));
+  if (!processes.length) return '<div class="app-manager-processes"><span>当前无运行进程</span></div>';
+  return `<div class="app-manager-processes">${processes.map(process => `<span>${escapeHtml(process.user || '未知用户')} · UID ${escapeHtml(process.uid || '未知')} · PID ${escapeHtml(process.pid)} · ${escapeHtml(process.name)}</span>`).join('')}</div>`;
+}
+
+function applicationUserCard(packageName, user, item) {
+  const processes = (item.processes || []).filter(process => Number(process.user_id) === Number(user.user_id));
+  const label = `User ${user.user_id}${user.name ? ` · ${user.name}` : ''}${user.current ? ' · 当前用户' : ''}`;
+  const systemWarning = Number(user.user_id) === 0 ? '<small class="warning-text">System User，操作可能影响设备的系统后台服务。</small>' : '';
+  return `<section class="app-user-card">
+    <header><div><b>${escapeHtml(label)}</b><small>${user.enabled ? '已启用' : '已禁用'} · ${user.stopped ? '已强制停止' : '未强制停止'} · ${processes.length ? `${processes.length} 个运行实例` : '无运行实例'}</small></div><code>User ${user.user_id}</code></header>
+    ${applicationProcessMeta(item, user.user_id)}${systemWarning}
+    <div class="app-user-actions">
+      <button class="button primary" type="button" onclick="runApplicationUserAction('launch','${escapeHtml(packageName)}',${user.user_id},undefined,this)">启动</button>
+      <button class="button subtle" type="button" onclick="runApplicationUserAction('stop','${escapeHtml(packageName)}',${user.user_id},undefined,this)" ${processes.length ? '' : 'disabled'}>强制停止</button>
+      <button class="button subtle" type="button" onclick="runApplicationUserAction('enabled','${escapeHtml(packageName)}',${user.user_id},${user.enabled ? 'false' : 'true'},this)">${user.enabled ? '禁用' : '启用'}</button>
+      <button class="button danger" type="button" onclick="runApplicationUserAction('clear','${escapeHtml(packageName)}',${user.user_id},undefined,this)">清除数据</button>
+      <button class="button danger" type="button" onclick="runApplicationUserAction('uninstall','${escapeHtml(packageName)}',${user.user_id},undefined,this)">仅从此 User 卸载</button>
+    </div>
+  </section>`;
+}
+
 function applicationItem(item) {
   const watched = watchedPackages().includes(item.package), signature = applicationSignatureMeta(item.package);
   return `<article class="app-manager-row">
     <i class="process-dot${item.running ? ' running' : ''}"></i>
-    <div class="app-manager-main"><b>${escapeHtml(item.package)}</b><div class="app-manager-meta"><span>${item.kind === 'user' ? '用户应用' : '系统应用'}</span>${item.uid ? `<span>UID ${escapeHtml(item.uid)}</span>` : ''}<span>${item.pids?.length ? `PID ${item.pids.map(escapeHtml).join('、')}` : '未运行'}</span><button class="app-manager-signature${signature.resolved ? ' resolved' : ''}" type="button" onclick="queryApplicationPlatformSignature('${escapeHtml(item.package)}',this)">${signature.label}</button></div><small title="${escapeHtml(item.apk_path)}">${escapeHtml(item.apk_path)}</small></div>
+    <div class="app-manager-main"><b>${escapeHtml(item.package)}</b><div class="app-manager-meta"><span>${item.kind === 'user' ? '用户应用' : '系统应用'}</span>${item.uid ? `<span>安装 UID ${escapeHtml(item.uid.split(',').join(' / '))}</span>` : ''}<button class="app-manager-signature${signature.resolved ? ' resolved' : ''}" type="button" onclick="queryApplicationPlatformSignature('${escapeHtml(item.package)}',this)">${signature.label}</button></div>${applicationProcessMeta(item)}<small title="${escapeHtml(item.apk_path)}">${escapeHtml(item.apk_path)}</small></div>
     <span class="process-state${item.running ? ' running' : ''}">${item.running ? 'RUNNING' : 'STOPPED'}</span>
     <button class="watch-toggle${watched ? ' active' : ''}" type="button" onclick="toggleWatchedPackage('${escapeHtml(item.package)}')" title="${watched ? '取消手动关注' : '添加到关注应用'}">${watched ? '★' : '☆'}</button>
     <button class="button subtle" type="button" onclick="openApplicationDetails('${escapeHtml(item.package)}')">详情</button>
-    <button class="button subtle" type="button" onclick="runApplicationAction('launch','${escapeHtml(item.package)}')">启动</button>
-    <button class="button danger" type="button" onclick="runApplicationAction('stop','${escapeHtml(item.package)}')" ${item.running ? '' : 'disabled'}>停止</button>
   </article>`;
 }
 
@@ -129,32 +150,49 @@ async function loadProcesses(force = false) {
   catch (error) { root.innerHTML = `<div class="process-row">${escapeHtml(error.message)}</div>`; }
 }
 
-async function openApplicationDetails(packageName) {
-  openFeatureModal('app-details', `应用详情：${packageName}`, `<div class="app-detail-loading" aria-live="polite">
-    <div class="app-detail-loading-heading"><span class="app-detail-spinner"></span><b>正在读取应用详情…</b></div>
-    <div class="app-detail-loading-grid">${Array.from({length: 8}, () => '<i></i>').join('')}</div>
-  </div>`, {hideFooter: true});
-  try {
-    const item = state.appManager.items.find(value => value.package === packageName) || {};
-    const detail = await api(`/api/apps/details?serial=${encodeURIComponent(selectedAdbSerial())}&package=${encodeURIComponent(packageName)}`);
-    if (state.featureConfigKind !== 'app-details') return;
-    state.appManager.details[packageName] = detail;
-    const enabledText = detail.enabled ? '已启用' : '已禁用';
-    const signatureText = {platform: '平台签名匹配', non_platform: '非平台签名', unknown: '签名未知'}[detail.signature_status] || '签名未知';
-    $('#configModalBody').innerHTML = `<div class="app-detail-grid">
+function applicationDetailsLoading() {
+  return `<div class="app-detail-loading" aria-live="polite"><div class="app-detail-loading-heading"><span class="app-detail-spinner"></span><b>正在读取应用详情…</b></div><div class="app-detail-loading-grid">${Array.from({length: 8}, () => '<i></i>').join('')}</div></div>`;
+}
+
+function applicationDetailsContent(packageName, item, detail) {
+  const detailItem = {...item, processes: detail.processes || item.processes || []};
+  const users = Array.isArray(detail.users) ? detail.users : [];
+  const signatureText = {platform: '平台签名匹配', non_platform: '非平台签名', unknown: '签名未知'}[detail.signature_status] || '签名未知';
+  return `<div class="app-detail-grid">
       <section><span>包名</span><code>${escapeHtml(packageName)}</code></section>
       <section><span>应用类型</span><b>${item.kind === 'user' ? '用户应用' : '系统应用'}</b></section>
       <section><span>版本</span><b>${escapeHtml(detail.version_name || '未知')} ${detail.version_code ? `(${escapeHtml(detail.version_code)})` : ''}</b></section>
-      <section><span>UID</span><b>${escapeHtml(detail.uid || item.uid || '未知')}</b></section>
-      <section><span>状态</span><b>${enabledText}${item.running ? ' · 运行中' : ' · 未运行'}</b></section>
+      <section><span>安装 UID</span><b>${escapeHtml(item.uid ? item.uid.split(',').join(' / ') : detail.uid || '未知')}</b></section>
+      <section><span>运行状态</span><b>${detailItem.processes.length ? `共 ${detailItem.processes.length} 个进程` : '未运行'}</b></section>
       <section><span>平台签名</span><b>${signatureText}</b><small>应用类型表示安装位置；平台签名表示证书是否与 android 包一致，两者不是同一概念。</small></section>
       <section><span>安装时间</span><b>${escapeHtml(detail.first_install_time || '未知')}</b></section>
       <section><span>更新时间</span><b>${escapeHtml(detail.last_update_time || '未知')}</b></section>
+      <section class="app-detail-wide"><span>运行实例</span>${applicationProcessMeta(detailItem)}</section>
       <section class="app-detail-wide"><span>APK 路径</span><code>${escapeHtml((detail.apk_paths || []).join('\n') || '未知')}</code></section>
-    </div><div class="app-certificate-result" id="appManagerCertificateResult"><span>签名证书 SHA-256</span><small>尚未计算</small></div><div class="app-detail-progress" id="appManagerActionProgress" hidden><span></span><i></i></div><div class="app-detail-actions">
-      <section class="app-detail-action-group"><span>常用操作</span><div><button class="button primary" onclick="runApplicationAction('launch','${escapeHtml(packageName)}')">启动</button><button class="button subtle" onclick="runApplicationAction('stop','${escapeHtml(packageName)}')">强制停止</button><button class="button subtle" onclick="runApplicationAction('pull-apk','${escapeHtml(packageName)}',undefined,this)">Pull APK</button><button class="button subtle" id="appManagerCertificateButton" onclick="calculateApplicationCertificate('${escapeHtml(packageName)}',this)">证书 SHA-256</button><button class="button subtle" id="appSpecialLaunchButton" data-package="${escapeHtml(packageName)}" onclick="openApplicationLaunchConfig('${escapeHtml(packageName)}')">${detail.launch_configured ? '编辑特殊拉起' : '特殊拉起配置'}</button></div></section>
-      <section class="app-detail-action-group app-detail-danger"><span>应用状态</span><div><button class="button subtle" onclick="runApplicationAction('enabled','${escapeHtml(packageName)}',${detail.enabled ? 'false' : 'true'})">${detail.enabled ? '禁用' : '启用'}</button><button class="button danger" onclick="runApplicationAction('clear','${escapeHtml(packageName)}')">清除数据</button><button class="button danger" onclick="runApplicationAction('uninstall','${escapeHtml(packageName)}')">卸载</button></div></section>
+    </div><section class="app-user-controls"><header><div><b>按 Android User 控制</b><small>启停、数据和启用状态均按 User 隔离。</small></div>${detailItem.processes.length ? `<button class="button danger" type="button" onclick="runApplicationUserAction('stop-all','${escapeHtml(packageName)}',undefined,undefined,this)">停止所有运行 User</button>` : ''}</header><div class="app-user-list">${users.length ? users.map(user => applicationUserCard(packageName, user, detailItem)).join('') : '<p class="page-description">未读取到已安装 User，不提供应用状态修改操作。</p>'}</div></section><div class="app-certificate-result" id="appManagerCertificateResult"><span>签名证书 SHA-256</span><small>尚未计算</small></div><div class="app-detail-progress" id="appManagerActionProgress" hidden><span></span><i></i></div><div class="app-detail-actions">
+      <section class="app-detail-action-group"><span>与 User 无关的应用操作</span><div><button class="button subtle" onclick="pullApplicationApk('${escapeHtml(packageName)}',this)">Pull APK</button><button class="button subtle" id="appManagerCertificateButton" onclick="calculateApplicationCertificate('${escapeHtml(packageName)}',this)">证书 SHA-256</button><button class="button subtle" id="appSpecialLaunchButton" data-package="${escapeHtml(packageName)}" onclick="openApplicationLaunchConfig('${escapeHtml(packageName)}')">${detail.launch_configured ? '编辑特殊拉起' : '特殊拉起配置'}</button></div></section>
     </div>`;
+}
+
+async function refreshApplicationDetails(packageName, preserveView = false) {
+  const body = $('#configModalBody');
+  if (!body || state.featureConfigKind !== 'app-details') return false;
+  const scrollTop = preserveView ? body.scrollTop : 0;
+  const certificateHtml = preserveView ? $('#appManagerCertificateResult')?.innerHTML || '' : '';
+  const item = state.appManager.items.find(value => value.package === packageName) || {};
+  const detail = await api(`/api/apps/details?serial=${encodeURIComponent(selectedAdbSerial())}&package=${encodeURIComponent(packageName)}`);
+  if (state.featureConfigKind !== 'app-details') return false;
+  state.appManager.details[packageName] = detail;
+  body.innerHTML = applicationDetailsContent(packageName, item, detail);
+  if (certificateHtml) $('#appManagerCertificateResult').innerHTML = certificateHtml;
+  body.scrollTop = scrollTop;
+  return true;
+}
+
+async function openApplicationDetails(packageName) {
+  openFeatureModal('app-details', `应用详情：${packageName}`, applicationDetailsLoading(), {hideFooter: true});
+  try {
+    await refreshApplicationDetails(packageName);
   } catch (error) {
     if (state.featureConfigKind === 'app-details') $('#configModalBody').innerHTML = `<p class="user-guide-error">${escapeHtml(error.message)}</p>`;
   }
@@ -204,35 +242,60 @@ function setApplicationActionProgress(button, message = '') {
   if (label) label.textContent = message;
 }
 
-async function runApplicationAction(action, packageName, enabled, button) {
+async function pullApplicationApk(packageName, button) {
+  setApplicationActionProgress(button, '正在从设备 Pull base.apk，请稍候…');
+  try {
+    const result = await api('/api/apps/pull-apk', {method: 'POST', body: JSON.stringify(withAdbSerial({package: packageName}))});
+    const link = document.createElement('a');
+    link.href = result.url;
+    link.download = result.name;
+    link.click();
+    if(typeof scheduleDownloadCacheStatusRefresh==='function')scheduleDownloadCacheStatusRefresh();
+    toast(`APK 已 Pull，正在选择保存位置：${result.name}`);
+  } catch (error) { toast(error.message, true); }
+  finally { setApplicationActionProgress(button); }
+}
+
+function setApplicationUserActionProgress(button, busy) {
+  if (!button) return;
+  if (!button.dataset.idleText) button.dataset.idleText = button.textContent;
+  button.disabled = busy;
+  button.textContent = busy ? '处理中…' : button.dataset.idleText;
+}
+
+async function runApplicationUserAction(action, packageName, userId, enabled, button) {
+  const scope = action === 'stop-all' ? '所有运行 User' : `User ${userId}`;
   const messages = {
-    clear: `确认清除“${packageName}”的全部应用数据？此操作不可恢复。`,
-    uninstall: `确认卸载“${packageName}”？应用及设备端数据将被删除。`,
-    enabled: enabled === false ? `确认禁用“${packageName}”？这可能影响依赖它的系统功能。` : '',
+    stop: `确认强制停止 ${scope} 下的“${packageName}”？`,
+    'stop-all': `确认强制停止所有运行 User 下的“${packageName}”？\n\n如果包含 System User，可能影响设备的系统后台服务。`,
+    clear: `确认清除 ${scope} 下“${packageName}”的全部应用数据？此操作不可恢复。`,
+    uninstall: `确认仅从 ${scope} 卸载“${packageName}”？该 User 的应用数据将被删除。`,
+    enabled: enabled === false ? `确认禁用 ${scope} 下的“${packageName}”？` : '',
   };
   const requiresConfirmation = Boolean(messages[action]);
   if (requiresConfirmation && !confirm(messages[action])) return;
-  if (action === 'pull-apk') setApplicationActionProgress(button, '正在从设备 Pull base.apk，请稍候…');
+  setApplicationUserActionProgress(button, true);
+  let operationCompleted = false;
   try {
-    const body = withAdbSerial({package: packageName, confirmed: requiresConfirmation});
+    const body = withAdbSerial({package: packageName, user_id: userId, confirmed: requiresConfirmation});
     if (action === 'enabled') body.enabled = enabled;
     const result = await api(`/api/apps/${action}`, {method: 'POST', body: JSON.stringify(body)});
     if (result.requires_confirmation) return toast(result.message, true);
-    if (action === 'pull-apk') {
-      const link = document.createElement('a');
-      link.href = result.url;
-      link.download = result.name;
-      link.click();
-      if(typeof scheduleDownloadCacheStatusRefresh==='function')scheduleDownloadCacheStatusRefresh();
-      toast(`APK 已 Pull，正在选择保存位置：${result.name}`);
-    } else {
-      toast(result.output || '操作完成', !result.ok);
+    const failed = Array.isArray(result.results) ? result.results.filter(item => !item.ok) : [];
+    const failedOperation = failed.length > 0 || result.ok === false;
+    if (failedOperation) return toast(failed.length ? `${scope} 操作失败：${failed[0].output || '未知错误'}` : `${scope} 操作失败：${result.output || '未知错误'}`, true);
+    operationCompleted = true;
+    await fetchApplications(true);
+    state.appManager.tab === 'processes' ? renderFocusedApplications() : renderApplications();
+    if (action === 'uninstall' && Array.isArray(result.remaining_users) && !result.remaining_users.length) {
       closeFeatureConfig();
-      await fetchApplications(true);
-      state.appManager.tab === 'processes' ? renderFocusedApplications() : renderApplications();
+      return toast(`${scope} 操作完成，应用已不再安装于任何 User`);
     }
-  } catch (error) { toast(error.message, true); }
-  finally {
-    if (action === 'pull-apk') setApplicationActionProgress(button);
+    await refreshApplicationDetails(packageName, true);
+    toast(`${scope} 操作完成`);
+  } catch (error) {
+    toast(operationCompleted ? `操作已完成，但刷新详情失败：${error.message}` : error.message, true);
+  } finally {
+    if (button?.isConnected) setApplicationUserActionProgress(button, false);
   }
 }

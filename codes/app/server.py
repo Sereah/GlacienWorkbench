@@ -179,7 +179,7 @@ class Handler(BaseHTTPRequestHandler):
             settings,body=config.load(),self.body(); route=self.path
             # 先拒绝空/未知日志规则，避免未连接设备时掩盖“全部日志”绕过问题。
             if route=="/api/logs/export": device.saved_log_filter(settings, body.get("preset", ""))
-            selected=android.selected_device_settings(settings,body.get("serial","")) if route in {"/api/install","/api/apks/push","/api/resources/push","/api/processes/stop","/api/processes/launch","/api/processes/uninstall","/api/processes/cert-sha256","/api/apps/launch","/api/apps/stop","/api/apps/clear","/api/apps/enabled","/api/apps/uninstall","/api/apps/pull-apk","/api/bugreports/start","/api/performance/start","/api/broadcasts/send","/api/adb-commands/run","/api/logs/export","/api/logs/clear","/api/device-logs/scan","/api/device-logs/pull","/api/captures/screenshot","/api/captures/record/start","/api/captures/scrcpy/launch","/api/device-files/pull","/api/device-files/pull-batch","/api/device-files/delete","/api/device-files/delete-batch","/api/device-files/create-directory","/api/device-files/create-file","/api/device-files/preview","/api/adb/root","/api/adb/remount","/api/adb/reboot"} else settings
+            selected=android.selected_device_settings(settings,body.get("serial","")) if route in {"/api/install","/api/apks/push","/api/resources/push","/api/processes/stop","/api/processes/launch","/api/processes/uninstall","/api/processes/cert-sha256","/api/apps/launch","/api/apps/stop","/api/apps/stop-all","/api/apps/clear","/api/apps/enabled","/api/apps/uninstall","/api/apps/pull-apk","/api/bugreports/start","/api/performance/start","/api/broadcasts/send","/api/adb-commands/run","/api/logs/export","/api/logs/clear","/api/device-logs/scan","/api/device-logs/pull","/api/captures/screenshot","/api/captures/record/start","/api/captures/scrcpy/launch","/api/device-files/pull","/api/device-files/pull-batch","/api/device-files/delete","/api/device-files/delete-batch","/api/device-files/create-directory","/api/device-files/create-file","/api/device-files/preview","/api/adb/root","/api/adb/remount","/api/adb/reboot"} else settings
             actions={"/api/install":lambda:artifacts.install(selected,body),"/api/apks/md5":lambda:artifacts.checksum(settings,body),"/api/apks/delete":lambda:artifacts.delete(settings,body),"/api/apks/rename":lambda:artifacts.rename_apk(settings,body),"/api/apks/sign":lambda:artifacts.sign(settings,body),"/api/resources/md5":lambda:artifacts.resource_checksum(settings,body),"/api/resources/delete":lambda:artifacts.delete_resource(settings,body),"/api/resources/rename":lambda:artifacts.rename_resource(settings,body),"/api/resources/push":lambda:artifacts.push(selected,body),"/api/processes/stop":lambda:device.stop(selected,body.get("package","")),"/api/processes/launch":lambda:device.launch(selected,body.get("package",""))}
             actions["/api/apks/collect"] = lambda: artifacts.collect_apks(settings, body)
             actions["/api/apks/sha256"] = lambda: artifacts.sha256_checksum(settings, body)
@@ -200,11 +200,12 @@ class Handler(BaseHTTPRequestHandler):
             actions["/api/adb/wireless-disconnect"] = lambda: android.disconnect_wireless(settings, body)
             actions["/api/adb/wireless-cleanup"] = lambda: android.clean_offline_wireless(settings)
             actions["/api/adb/force-kill"] = lambda: android.force_kill_adb()
-            actions["/api/apps/launch"] = lambda: app_manager.launch(selected, body.get("package", ""))
-            actions["/api/apps/stop"] = lambda: app_manager.stop(selected, body.get("package", ""))
-            actions["/api/apps/clear"] = lambda: app_manager.clear_data(selected, body.get("package", ""), body.get("confirmed"))
-            actions["/api/apps/enabled"] = lambda: app_manager.set_enabled(selected, body.get("package", ""), body.get("enabled"), body.get("confirmed"))
-            actions["/api/apps/uninstall"] = lambda: app_manager.uninstall(selected, body.get("package", ""), body.get("confirmed"))
+            actions["/api/apps/launch"] = lambda: app_manager.launch(selected, body.get("package", ""), body.get("user_id"))
+            actions["/api/apps/stop"] = lambda: app_manager.stop(selected, body.get("package", ""), body.get("user_id"))
+            actions["/api/apps/stop-all"] = lambda: app_manager.stop_all(selected, body.get("package", ""), body.get("confirmed"))
+            actions["/api/apps/clear"] = lambda: app_manager.clear_data(selected, body.get("package", ""), body.get("user_id"), body.get("confirmed"))
+            actions["/api/apps/enabled"] = lambda: app_manager.set_enabled(selected, body.get("package", ""), body.get("user_id"), body.get("enabled"), body.get("confirmed"))
+            actions["/api/apps/uninstall"] = lambda: app_manager.uninstall(selected, body.get("package", ""), body.get("user_id"), body.get("confirmed"))
             actions["/api/apps/pull-apk"] = lambda: app_manager.pull_apk(selected, body.get("package", ""))
             actions["/api/bugreports/start"] = lambda: bugreports.start(selected, body)
             actions["/api/bugreports/cancel"] = bugreports.cancel

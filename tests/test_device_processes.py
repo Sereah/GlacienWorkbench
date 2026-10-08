@@ -7,6 +7,17 @@ from codes.app import device
 
 
 class DeviceProcessesTest(unittest.TestCase):
+    def test_saved_launch_command_targets_selected_user(self):
+        settings = {
+            "_selected_adb_serial": "device-1",
+            "app_launches": {"com.example.app": {"command": "am start -n com.example.app/.MainActivity"}},
+        }
+        with patch.object(device.android, "device_adb", return_value=(0, "Starting", "")) as adb:
+            result = device.launch(settings, "com.example.app", 10)
+
+        self.assertTrue(result["ok"])
+        adb.assert_called_once_with(settings, "shell", "am start --user 10 -n com.example.app/.MainActivity", timeout=30)
+
     def test_parses_version_name_and_code(self):
         package_dump = """
         Package [com.example.app]:
