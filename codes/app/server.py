@@ -217,6 +217,7 @@ class Handler(BaseHTTPRequestHandler):
             actions["/api/performance/stop"] = performance.stop
             actions["/api/performance/sessions/delete"] = lambda: performance.delete_sessions(body.get("ids"), body.get("confirmed"))
             actions["/api/offline-logs/query"] = lambda: logs.query(settings, body)
+            actions["/api/offline-logs/context"] = lambda: logs.context(settings, body)
             actions["/api/offline-logs/import-preview"] = lambda: logs.preview_import(body)
             actions["/api/offline-logs/import"] = lambda: logs.import_source(settings, body)
             actions["/api/offline-logs/delete-source"] = lambda: logs.delete_source(settings, body)

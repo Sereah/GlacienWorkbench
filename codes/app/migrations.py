@@ -105,6 +105,7 @@ def _offline_logs_v2_to_v3(value: dict) -> dict:
             "managed": False,
             "legacy": True,
             "original_path": str(raw),
+            "description": "",
             "ignored_archives": [],
         }
     return {**value, "offline_log_sources": migrated}
@@ -125,6 +126,7 @@ def normalize(feature: str, value: dict) -> dict:
                 source = dict(raw)
                 source["id"] = str(source.get("id") or _legacy_offline_source_id(clean_name, source.get("path", "")))
                 source["managed"] = bool(source.get("managed"))
+                source["description"] = str(source.get("description", ""))
                 source["ignored_archives"] = source.get("ignored_archives") if isinstance(source.get("ignored_archives"), list) else []
                 normalized[clean_name] = source
             else:
@@ -134,6 +136,7 @@ def normalize(feature: str, value: dict) -> dict:
                     "managed": False,
                     "legacy": True,
                     "original_path": str(raw),
+                    "description": "",
                     "ignored_archives": [],
                 }
         return {**value, "offline_log_sources": normalized}

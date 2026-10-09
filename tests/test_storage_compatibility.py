@@ -84,6 +84,7 @@ class StorageCompatibilityTest(unittest.TestCase):
         self.assertEqual("/tmp/runlog", value["offline_log_sources"]["runlog"]["path"])
         self.assertFalse(value["offline_log_sources"]["runlog"]["managed"])
         self.assertTrue(value["offline_log_sources"]["runlog"]["legacy"])
+        self.assertEqual("", value["offline_log_sources"]["runlog"]["description"])
         self.assertEqual({"keep": True}, value["unknown_future_field"])
         self.assertEqual(1, len(list((storage.ROOT / "runtime/migration-backups").rglob("offline-logs/config.json"))))
 

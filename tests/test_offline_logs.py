@@ -141,6 +141,41 @@ class OfflineLogArchiveTest(unittest.TestCase):
         self.assertEqual([2, 3], [item["line"] for item in result["results"]])
         self.assertIn("[EFA]", run.call_args.args[0][-2])
 
+    def test_context_returns_window_and_marks_matching_lines(self):
+        log_file = self.source / "system.log"
+        log_file.write_text("\n".join([
+            "before",
+            "10-08 12:00:00.000  1  1 I App: mine",
+            "10-08 12:00:01.000  2  2 W Other: warning",
+            "10-08 12:00:02.000  3  3 E App: mine error",
+            "after",
+        ]) + "\n", encoding="utf-8")
+
+        result = logs.context(self.settings(), {
+            "source": "test",
+            "file": "system.log",
+            "line": 3,
+            "before": 1,
+            "after": 1,
+            "filters": [{"mode": "include_any", "terms": ["mine"]}],
+        })
+
+        self.assertEqual((2, 4), (result["start_line"], result["end_line"]))
+        self.assertEqual([2, 3, 4], [item["line"] for item in result["lines"]])
+        self.assertEqual([True, False, True], [item["matched"] for item in result["lines"]])
+        self.assertTrue(result["lines"][1]["target"])
+
+    def test_context_rejects_path_traversal(self):
+        (self.source / "system.log").write_text("needle\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "路径越界"):
+            logs.context(self.settings(), {
+                "source": "test",
+                "file": "../escaped.log",
+                "line": 1,
+                "filters": [{"mode": "include_any", "terms": ["needle"]}],
+            })
+
     def test_priority_constraint_requires_included_keyword(self):
         filters = logs.normalize_filters([{"mode": "include_any", "terms": ["normal"]}])
 
@@ -263,7 +298,7 @@ class OfflineLogArchiveTest(unittest.TestCase):
 
         result = logs.import_source(
             {"offline_log_sources": {}},
-            {"name": "runlog", "path": str(self.source), "confirmed": True},
+            {"name": "runlog", "path": str(self.source), "description": "JIRA-1234 https://jira.example/browse/JIRA-1234", "confirmed": True},
         )
 
         managed = storage.data_dir("offline_logs", "sources") / result["record"]["path"]
@@ -274,6 +309,7 @@ class OfflineLogArchiveTest(unittest.TestCase):
         listed = logs.sources(settings)[0]
         self.assertTrue(listed["managed"])
         self.assertEqual(1, listed["file_count"])
+        self.assertEqual("JIRA-1234 https://jira.example/browse/JIRA-1234", listed["description"])
 
         deleted = logs.delete_source(settings, {"source": "runlog", "confirmed": True})
         self.assertGreater(deleted["released_bytes"], 0)

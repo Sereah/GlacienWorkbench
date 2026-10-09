@@ -27,6 +27,7 @@ from . import proc, storage
 MAX_FILTERS = 30
 MAX_TERMS = 100
 QUERY_TIMEOUT_SECONDS = 300
+MAX_CONTEXT_LINES = 5000
 VALID_MODES = {"include_any", "include_all", "exclude_any"}
 LOG_PRIORITY_RANK = {priority: rank for rank, priority in enumerate(("V", "D", "I", "W", "E", "F"))}
 LOG_PRIORITY_CHARS = {"V": "VDIWEFA", "D": "DIWEFA", "I": "IWEFA", "W": "WEFA", "E": "EFA", "F": "FA"}
@@ -59,6 +60,13 @@ def _safe_display_name(value: object) -> str:
     if len(name) > 80:
         raise ValueError("日志来源名称不能超过 80 个字符")
     return name
+
+
+def _safe_description(value: object) -> str:
+    description = str(value or "").strip()
+    if len(description) > 1000:
+        raise ValueError("日志来源描述不能超过 1000 个字符")
+    return "".join(char for char in description if ord(char) not in (0, 10, 13))
 
 
 def _is_windows_absolute(value: str) -> bool:
@@ -196,6 +204,7 @@ def sources(settings: dict) -> list[dict]:
             "ignored_count": len(ignored),
             "imported_at": str(record.get("imported_at", "")),
             "original_path": str(record.get("original_path", "")),
+            "description": str(record.get("description", "")),
         })
     return sorted(result, key=lambda item: item["name"])
 
@@ -445,6 +454,7 @@ def _extract_archives_in_folder(folder: Path, ignore_failed: bool) -> dict:
 def preview_import(body: dict) -> dict:
     """预览一次来源导入，展示移动前大小和压缩包清单。"""
     name = _safe_display_name(body.get("name"))
+    description = _safe_description(body.get("description"))
     source = _input_path(body.get("path"))
     available, kind, error = _source_status(source)
     if not available:
@@ -452,7 +462,7 @@ def preview_import(body: dict) -> dict:
     if kind == "archive":
         raise ValueError("单独的压缩日志请改选其所在文件夹")
     summary = _source_summary(source)
-    return {"name": name, "source_path": str(source), **summary}
+    return {"name": name, "description": description, "source_path": str(source), **summary}
 
 
 def import_source(settings: dict, body: dict) -> dict:
@@ -460,6 +470,7 @@ def import_source(settings: dict, body: dict) -> dict:
     if body.get("confirmed") is not True:
         raise ValueError("导入日志来源前必须由用户确认")
     name = _safe_display_name(body.get("name"))
+    description = _safe_description(body.get("description"))
     source = _input_path(body.get("path"))
     sources_map = dict(settings.get("offline_log_sources", {}))
     if name in sources_map and not body.get("replace"):
@@ -482,6 +493,7 @@ def import_source(settings: dict, body: dict) -> dict:
                 "imported_at": _now_iso(),
                 "bytes": stats["bytes"],
                 "file_count": stats["file_count"],
+                "description": description,
                 "ignored_archives": extract_result["ignored_archives"],
             }
             if name in sources_map:
@@ -537,6 +549,81 @@ def delete_source(settings: dict, body: dict) -> dict:
     sources_map.pop(name, None)
     offline_config = storage.update("offline_logs", {"offline_log_sources": sources_map})
     return {"source": name, "released_bytes": released, "offline_config": offline_config}
+
+
+def _source_relative_file(source: Path, value: object) -> Path:
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError("请选择要查看上下文的日志文件")
+    if source.is_file():
+        if raw not in {source.name, str(source)}:
+            raise ValueError("日志文件不属于当前来源")
+        return source
+    candidate = (source / raw).resolve()
+    try:
+        candidate.relative_to(source.resolve())
+    except ValueError as error:
+        raise ValueError("日志文件路径越界") from error
+    if not candidate.is_file() or candidate.is_symlink():
+        raise ValueError("日志文件不可用")
+    if _archive_kind(candidate):
+        raise ValueError("压缩日志不能直接查看上下文")
+    return candidate
+
+
+def _context_count(value: object, default: int) -> int:
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        count = default
+    if count < 0:
+        raise ValueError("上下文行数不能小于 0")
+    return min(count, MAX_CONTEXT_LINES)
+
+
+def context(settings: dict, body: dict) -> dict:
+    """读取某条离线命中日志所在文件的前后文，并标记同筛选条件命中行。"""
+    source_name, source = source_path(settings, body.get("source"))
+    file_path = _source_relative_file(source, body.get("file"))
+    filters = normalize_filters(body.get("filters"))
+    priority_constraints = normalize_priority_constraints(body.get("priority_constraints"), filters)
+    try:
+        target_line = int(body.get("line"))
+    except (TypeError, ValueError) as error:
+        raise ValueError("目标行号无效") from error
+    if target_line < 1:
+        raise ValueError("目标行号必须大于 0")
+    before = _context_count(body.get("before"), 80)
+    after = _context_count(body.get("after"), 120)
+    start_line = max(1, target_line - before)
+    end_line = target_line + after
+    lines = []
+    with file_path.open("r", encoding="utf-8", errors="replace") as stream:
+        for number, text in enumerate(stream, start=1):
+            if number < start_line:
+                continue
+            if number > end_line:
+                break
+            line = text.rstrip("\r\n")
+            lines.append({
+                "line": number,
+                "text": line,
+                "target": number == target_line,
+                "matched": line_matches(line, filters, priority_constraints),
+            })
+    if not lines:
+        raise ValueError("目标行号超出日志文件范围")
+    relative = file_path.name if source.is_file() else str(file_path.resolve().relative_to(source))
+    return {
+        "source": source_name,
+        "file": relative,
+        "target_line": target_line,
+        "start_line": lines[0]["line"],
+        "end_line": lines[-1]["line"],
+        "before": before,
+        "after": after,
+        "lines": lines,
+    }
 
 def normalize_filters(value: object) -> list[dict]:
     if not isinstance(value, list) or not value:
