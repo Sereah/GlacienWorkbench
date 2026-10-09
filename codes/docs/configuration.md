@@ -76,7 +76,7 @@ GlacienWorkbench/
 - 业务保存使用 `storage.update()`，HTTP 使用 `POST /api/config/domain`，一次只修改一个域并保留未知字段。`GET /api/config` 继续提供前端聚合视图，但不再接受聚合保存。
 - 当前 `commands` schema 为 v2，每条自定义命令都有独立 `id`；名称和分类可修改，ID 不变。旧 v1 命令会在首次读取时补 ID。
 - 当前 `processes` schema 为 v2，`watched_packages` 保存用户明确关注的包名，原 `process_package_keywords` 继续提供批量匹配；每个包的特殊拉起入口保存为 `app_launches.<package>.command`。旧 v1 的 action、component、activity 和 extras 会在备份后转换成等价的 `am start` 命令。
-- 当前 `offline_logs` schema 为 v3，`offline_log_sources` 保存受管日志来源记录：来源 ID、用户数据目录内相对路径、原始路径、导入时间、文件数量、占用空间和被忽略的压缩包。旧 v1/v2 绝对路径会迁移为 `legacy` 记录，不在迁移中移动或删除用户文件；用户重新导入后才进入受管目录。
+- 当前 `offline_logs` schema 为 v4，`offline_log_sources` 保存受管日志来源记录：来源 ID、用户数据目录内相对路径、原始路径、导入时间、文件数量、占用空间和被忽略的压缩包。`offline_source_presets` 按来源 ID 保存某个日志来源的分析快照：筛选条件、关键词级别限制、高亮词、来源显示名、基准方案名和更新时间；不保存原始日志路径或日志正文。旧 v1/v2 绝对路径会迁移为 `legacy` 记录，不在迁移中移动或删除用户文件；旧 v3 数据默认没有来源级覆盖。
 
 页面调整不触发数据迁移。例如部署中心改名或移动 Tab 仍使用 `apk_center`，日志 Pull 移入设备工具仍使用 `device_logs`，截图和录屏调整布局仍使用 `captures`。只有持久化数据结构变化才提升对应 schema。
 

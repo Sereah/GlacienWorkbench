@@ -80,13 +80,52 @@ class StorageCompatibilityTest(unittest.TestCase):
 
         value = storage.read("offline_logs", storage.default("offline_logs"))
 
-        self.assertEqual(3, value["schema_version"])
+        self.assertEqual(4, value["schema_version"])
         self.assertEqual("/tmp/runlog", value["offline_log_sources"]["runlog"]["path"])
         self.assertFalse(value["offline_log_sources"]["runlog"]["managed"])
         self.assertTrue(value["offline_log_sources"]["runlog"]["legacy"])
         self.assertEqual("", value["offline_log_sources"]["runlog"]["description"])
+        self.assertEqual({}, value["offline_source_presets"])
         self.assertEqual({"keep": True}, value["unknown_future_field"])
         self.assertEqual(1, len(list((storage.ROOT / "runtime/migration-backups").rglob("offline-logs/config.json"))))
+
+    def test_offline_source_presets_upgrade_and_normalize(self):
+        path = storage.path("offline_logs")
+        path.write_text(json.dumps({
+            "storage_key": "offline_logs",
+            "schema_version": 3,
+            "offline_filter_presets": {},
+            "offline_log_sources": {"runlog": {"id": "src_1", "path": "src_1", "managed": True}},
+        }), encoding="utf-8")
+
+        value = storage.read("offline_logs", storage.default("offline_logs"))
+
+        self.assertEqual(4, value["schema_version"])
+        self.assertEqual({}, value["offline_source_presets"])
+        self.assertEqual(1, len(list((storage.ROOT / "runtime/migration-backups").rglob("offline-logs/config.json"))))
+
+        storage.update("offline_logs", {
+            "offline_source_presets": {
+                "src_1": {
+                    "source_name": "runlog",
+                    "base_preset": "语音异常",
+                    "filters": [{"mode": "include_any", "terms": ["ASR", "TTS"]}],
+                    "priority_constraints": [{"term": "ASR", "minimum_priority": "E"}],
+                    "highlights": {"red": ["ASR"]},
+                    "highlight_case_sensitive": True,
+                    "updated_at": "2026-10-09T00:00:00.000Z",
+                }
+            }
+        })
+
+        current = storage.read("offline_logs", storage.default("offline_logs"))
+        session = current["offline_source_presets"]["src_1"]
+        self.assertEqual("runlog", session["source_name"])
+        self.assertEqual("语音异常", session["base_preset"])
+        self.assertEqual([{"mode": "include_any", "terms": ["ASR", "TTS"]}], session["filters"])
+        self.assertEqual([{"term": "ASR", "minimum_priority": "E"}], session["priority_constraints"])
+        self.assertEqual({"red": ["ASR"]}, session["highlights"])
+        self.assertTrue(session["highlight_case_sensitive"])
 
     def test_user_data_usage_groups_registered_domains_and_other_files(self):
         storage.write("app", {**storage.default("app"), "port": 8911})
@@ -185,6 +224,7 @@ class StorageCompatibilityTest(unittest.TestCase):
         api_source = (Path(__file__).parents[1] / "codes/web/core/api.js").read_text(encoding="utf-8")
 
         self.assertIn("performance_diagnostics: ['sample_interval_seconds']", api_source)
+        self.assertIn("offline_logs: ['offline_filter_presets', 'offline_source_presets']", api_source)
 
     def test_selected_theme_is_saved_in_user_data(self):
         storage.update("themes", {"themes": {"custom": {"name": "Custom"}}})

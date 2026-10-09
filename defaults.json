@@ -19,6 +19,7 @@
   "resource_device_paths": {},
   "broadcasts": {},
   "offline_filter_presets": {},
+  "offline_source_presets": {},
   "adb_commands": {
     "过滤app安装的地方": {
       "category": "package相关",

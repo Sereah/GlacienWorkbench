@@ -2,7 +2,7 @@ let persistedConfigSnapshot = null;
 const configDomainFields = {
   app: ['port'], adb: ['sdk_root'], apk_center: ['apk_sources', 'apk_push_device_paths'],
   signing: ['signing'], resources: ['resource_device_paths'], processes: ['process_package_keywords', 'watched_packages', 'app_launches'],
-  broadcasts: ['broadcasts'], live_logs: ['log_filters'], offline_logs: ['offline_filter_presets'],
+  broadcasts: ['broadcasts'], live_logs: ['log_filters'], offline_logs: ['offline_filter_presets', 'offline_source_presets'],
   device_logs: ['device_log_sources'], commands: ['adb_commands', 'adb_command_categories'], captures: ['scrcpy_path'],
   audio_processing: ['ffmpeg_path', 'audio_sample_format', 'audio_sample_rate', 'audio_channels'],
   performance_diagnostics: ['sample_interval_seconds'], themes: ['selected_theme'],

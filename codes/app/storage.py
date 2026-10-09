@@ -32,7 +32,7 @@ STORAGE_DOMAINS = {
     "device_files": {"config": None, "root": ".", "directories": ("downloads",)},
     "bugreports": {"config": None, "root": "adb-tools/bugreports", "directories": ("files", "runtime")},
     "performance_diagnostics": {"config": "adb-tools/performance-diagnostics/config.json", "default": {"storage_key": "performance_diagnostics", "schema_version": 1, "sample_interval_seconds": 1}, "directories": ("sessions", "runtime")},
-    "offline_logs": {"config": "local-tools/offline-logs/config.json", "default": {"storage_key": "offline_logs", "schema_version": 3, "offline_filter_presets": {}, "offline_log_sources": {}}, "directories": ("sources",)},
+    "offline_logs": {"config": "local-tools/offline-logs/config.json", "default": {"storage_key": "offline_logs", "schema_version": 4, "offline_filter_presets": {}, "offline_log_sources": {}, "offline_source_presets": {}}, "directories": ("sources",)},
     "audio_processing": {"config": "local-tools/audio-processing/config.json", "default": {"storage_key": "audio_processing", "schema_version": 1, "ffmpeg_path": "", "sample_format": "s16le", "sample_rate": 48000, "channels": 2}, "directories": ("inputs", "previews")},
     "themes": {"config": "runtime/themes.json", "default": {"storage_key": "themes", "schema_version": 1, "selected_theme": "", "themes": {}}, "directories": ()},
     "runtime": {"config": None, "root": "runtime", "directories": ("web-profile",)},
