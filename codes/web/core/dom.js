@@ -1,5 +1,6 @@
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
+const TOAST_TIMEOUT_MS = 3400;
 
 // 空输入框按 Tab 接受 placeholder；再次按 Tab 时恢复正常焦点切换。
 document.addEventListener('keydown', event => {
@@ -13,12 +14,71 @@ document.addEventListener('keydown', event => {
   input.dispatchEvent(new Event('change', {bubbles: true}));
 });
 
+function dismissToast() {
+  const element = $('#toast');
+  if (!element) return;
+  clearTimeout(window.toastTimer);
+  element.className = 'toast';
+  element.replaceChildren();
+}
+
+function createToastMessage(message) {
+  const content = document.createElement('div');
+  content.className = 'toast-message';
+  content.textContent = message;
+  return content;
+}
+
+function createSvgIcon(path) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  const iconPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  iconPath.setAttribute('d', path);
+  svg.append(iconPath);
+  return svg;
+}
+
+function createToastButton(label, iconPath, onClick) {
+  const button = document.createElement('button');
+  button.className = 'toast-button';
+  button.type = 'button';
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  button.append(createSvgIcon(iconPath));
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+function createToastActions(message) {
+  const actions = document.createElement('div');
+  actions.className = 'toast-actions';
+  const copyButton = createToastButton('复制错误内容', 'M8 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2M6 9h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z', async () => {
+    const copied = await copyTextToClipboard(message);
+    if (!copied) return;
+    copyButton.classList.add('copied');
+    copyButton.title = '已复制';
+    copyButton.setAttribute('aria-label', '已复制');
+  });
+  actions.append(
+    copyButton,
+    createToastButton('Dismiss', 'M6 6l12 12M18 6L6 18', dismissToast)
+  );
+  return actions;
+}
+
 function toast(message, error = false) {
   const element = $('#toast');
-  element.textContent = message;
-  element.className = `toast visible${error ? ' error' : ''}`;
+  if (!element) return;
   clearTimeout(window.toastTimer);
-  window.toastTimer = setTimeout(() => element.className = 'toast', 3400);
+  if (!error) {
+    element.textContent = message;
+    element.className = 'toast visible';
+    window.toastTimer = setTimeout(dismissToast, TOAST_TIMEOUT_MS);
+    return;
+  }
+  element.replaceChildren(createToastMessage(message), createToastActions(message));
+  element.className = 'toast visible error';
 }
 
 async function copyTextToClipboard(text) {
