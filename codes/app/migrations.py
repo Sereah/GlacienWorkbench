@@ -84,8 +84,59 @@ def _offline_logs_v1_to_v2(value: dict) -> dict:
     return value
 
 
+def _legacy_offline_source_id(name: str, path: object) -> str:
+    identity = json.dumps({"name": str(name), "path": str(path)}, ensure_ascii=False, sort_keys=True)
+    return "legacy_" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+
+
+def _offline_logs_v2_to_v3(value: dict) -> dict:
+    """旧来源只转换为 legacy 记录，不在 JSON 迁移中移动用户日志文件。"""
+    sources = value.get("offline_log_sources", {})
+    if not isinstance(sources, dict):
+        raise ValueError("offline_logs.offline_log_sources 必须是对象")
+    migrated = {}
+    for name, raw in sources.items():
+        if isinstance(raw, dict):
+            migrated[str(name)] = raw
+            continue
+        migrated[str(name)] = {
+            "id": _legacy_offline_source_id(str(name), raw),
+            "path": str(raw),
+            "managed": False,
+            "legacy": True,
+            "original_path": str(raw),
+            "ignored_archives": [],
+        }
+    return {**value, "offline_log_sources": migrated}
+
+
 def normalize(feature: str, value: dict) -> dict:
     """修复当前 schema 下可安全补齐的字段，不改变既有业务含义。"""
+    if feature == "offline_logs":
+        sources = value.get("offline_log_sources", {})
+        if not isinstance(sources, dict):
+            raise ValueError("offline_logs.offline_log_sources 必须是对象")
+        normalized = {}
+        for name, raw in sources.items():
+            clean_name = str(name).strip()
+            if not clean_name:
+                continue
+            if isinstance(raw, dict):
+                source = dict(raw)
+                source["id"] = str(source.get("id") or _legacy_offline_source_id(clean_name, source.get("path", "")))
+                source["managed"] = bool(source.get("managed"))
+                source["ignored_archives"] = source.get("ignored_archives") if isinstance(source.get("ignored_archives"), list) else []
+                normalized[clean_name] = source
+            else:
+                normalized[clean_name] = {
+                    "id": _legacy_offline_source_id(clean_name, raw),
+                    "path": str(raw),
+                    "managed": False,
+                    "legacy": True,
+                    "original_path": str(raw),
+                    "ignored_archives": [],
+                }
+        return {**value, "offline_log_sources": normalized}
     if feature == "processes":
         launches = value.get("app_launches", {})
         if not isinstance(launches, dict):
@@ -131,7 +182,7 @@ def normalize(feature: str, value: dict) -> dict:
 MIGRATIONS = {
     "commands": {1: _commands_v1_to_v2},
     "processes": {1: _processes_v1_to_v2},
-    "offline_logs": {1: _offline_logs_v1_to_v2},
+    "offline_logs": {1: _offline_logs_v1_to_v2, 2: _offline_logs_v2_to_v3},
 }
 
 

@@ -2,18 +2,19 @@ let persistedConfigSnapshot = null;
 const configDomainFields = {
   app: ['port'], adb: ['sdk_root'], apk_center: ['apk_sources', 'apk_push_device_paths'],
   signing: ['signing'], resources: ['resource_device_paths'], processes: ['process_package_keywords', 'watched_packages', 'app_launches'],
-  broadcasts: ['broadcasts'], live_logs: ['log_filters'], offline_logs: ['offline_filter_presets', 'offline_log_sources'],
+  broadcasts: ['broadcasts'], live_logs: ['log_filters'], offline_logs: ['offline_filter_presets'],
   device_logs: ['device_log_sources'], commands: ['adb_commands', 'adb_command_categories'], captures: ['scrcpy_path'],
   audio_processing: ['ffmpeg_path', 'audio_sample_format', 'audio_sample_rate', 'audio_channels'],
   performance_diagnostics: ['sample_interval_seconds'], themes: ['selected_theme'],
 };
+const readOnlyAggregateConfigFields = ['offline_log_sources'];
 
 function cloneConfig(value) { return JSON.parse(JSON.stringify(value)); }
 function sameConfigValue(left, right) { return JSON.stringify(left) === JSON.stringify(right); }
 
 async function saveLegacyConfigByDomain(body) {
   if (!persistedConfigSnapshot) throw new Error('配置基线尚未加载，请刷新页面后重试');
-  const knownFields = new Set(Object.values(configDomainFields).flat());
+  const knownFields = new Set([...Object.values(configDomainFields).flat(), ...readOnlyAggregateConfigFields]);
   const unknown = Object.keys(body).filter(key => key !== '_meta' && !knownFields.has(key));
   if (unknown.length) throw new Error('配置字段尚未登记稳定存储域：' + unknown.join('、'));
   const changed = Object.entries(configDomainFields).filter(([, fields]) => fields.some(field => Object.prototype.hasOwnProperty.call(body, field) && !sameConfigValue(body[field], persistedConfigSnapshot[field])));

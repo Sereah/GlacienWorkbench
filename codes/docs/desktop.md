@@ -60,7 +60,7 @@ macOS 使用标准 `.app` Bundle；Windows 和 Linux 使用 onefile。Qt WebEngi
 - 启动、关闭与同端口实例复用。
 - ADB 设备选择、安装、Push/Pull 和自定义命令。
 - Logcat SSE 建立、停止和窗口关闭后的子进程回收。
-- `webkitdirectory` 文件夹选择、Worker 分块扫描和停止扫描。
+- 离线日志来源导入、受管目录删除和 rg 高速扫描。
 - 普通文件上传、Blob 导出、HTTP 文件下载和另存为。
 - 截图文本/图片剪贴板、视频预览和 HTTP Range。
 - LocalStorage 与窗口重启后的设置保留。

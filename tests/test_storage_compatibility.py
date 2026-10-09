@@ -80,10 +80,27 @@ class StorageCompatibilityTest(unittest.TestCase):
 
         value = storage.read("offline_logs", storage.default("offline_logs"))
 
-        self.assertEqual(2, value["schema_version"])
-        self.assertEqual({"runlog": "/tmp/runlog"}, value["offline_log_sources"])
+        self.assertEqual(3, value["schema_version"])
+        self.assertEqual("/tmp/runlog", value["offline_log_sources"]["runlog"]["path"])
+        self.assertFalse(value["offline_log_sources"]["runlog"]["managed"])
+        self.assertTrue(value["offline_log_sources"]["runlog"]["legacy"])
         self.assertEqual({"keep": True}, value["unknown_future_field"])
         self.assertEqual(1, len(list((storage.ROOT / "runtime/migration-backups").rglob("offline-logs/config.json"))))
+
+    def test_user_data_usage_groups_registered_domains_and_other_files(self):
+        storage.write("app", {**storage.default("app"), "port": 8911})
+        apk_file = storage.data_dir("apk_center", "files") / "demo.apk"
+        apk_file.write_bytes(b"apk")
+        other_file = storage.ROOT / "manual.txt"
+        other_file.write_text("manual", encoding="utf-8")
+
+        usage = storage.usage()
+
+        features = {item["key"]: item for item in usage["features"]}
+        self.assertGreaterEqual(usage["bytes"], 3 + len("manual"))
+        self.assertGreaterEqual(features["apk_center"]["bytes"], 3)
+        self.assertGreaterEqual(features["app"]["files"], 1)
+        self.assertEqual(len("manual"), features["other"]["bytes"])
 
     def test_process_launch_command_is_restricted(self):
         self.assertEqual(

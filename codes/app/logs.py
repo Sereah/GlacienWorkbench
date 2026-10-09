@@ -16,11 +16,13 @@ import tarfile
 import tempfile
 import threading
 import time
+import uuid
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from . import proc
+from . import proc, storage
 
 MAX_FILTERS = 30
 MAX_TERMS = 100
@@ -34,6 +36,88 @@ MAX_ARCHIVE_FILES = 100_000
 MAX_ARCHIVE_BYTES = 50 * 1024 * 1024 * 1024
 MAX_COMPRESSION_RATIO = 500
 _ARCHIVE_LOCK = threading.Lock()
+
+
+def _managed_sources_root() -> Path:
+    return storage.data_dir("offline_logs", "sources")
+
+
+def _source_id() -> str:
+    return "src_" + uuid.uuid4().hex
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _safe_display_name(value: object) -> str:
+    name = str(value or "").strip()
+    if not name:
+        raise ValueError("请填写日志来源名称")
+    if any(ord(char) in (0, 10, 13) for char in name):
+        raise ValueError("日志来源名称不能包含换行或控制字符")
+    if len(name) > 80:
+        raise ValueError("日志来源名称不能超过 80 个字符")
+    return name
+
+
+def _is_windows_absolute(value: str) -> bool:
+    return len(value) >= 3 and re.match(r"^[A-Za-z]:", value[:2]) and value[2] in {"/", "\\"}
+
+
+def _input_path(value: object) -> Path:
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError("请选择日志文件或文件夹")
+    if not raw.startswith("/") and not _is_windows_absolute(raw):
+        raise ValueError("日志来源必须是绝对路径")
+    return Path(raw).expanduser().resolve()
+
+
+def _scan_tree(root: Path) -> dict:
+    if root.is_file():
+        stat = root.stat()
+        return {"bytes": stat.st_size, "file_count": 1}
+    total, count = 0, 0
+    for item in root.rglob("*"):
+        if not item.is_file() or item.is_symlink():
+            continue
+        try:
+            total += item.stat().st_size
+            count += 1
+        except OSError:
+            continue
+    return {"bytes": total, "file_count": count}
+
+
+def _relative_to_root(path: Path) -> str:
+    return path.resolve().relative_to(_managed_sources_root().resolve()).as_posix()
+
+
+def _managed_path(relative: object) -> Path:
+    root = _managed_sources_root().resolve()
+    target = (root / str(relative or "")).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as error:
+        raise ValueError("日志来源路径越界") from error
+    return target
+
+
+def _source_record(settings: dict, name: object) -> tuple[str, dict]:
+    clean_name = str(name or "").strip()
+    raw = settings.get("offline_log_sources", {}).get(clean_name)
+    if not clean_name or raw is None:
+        raise ValueError("请选择当前配置中已保存的日志来源")
+    if isinstance(raw, dict):
+        return clean_name, raw
+    return clean_name, {"id": "legacy", "path": str(raw), "managed": False, "legacy": True, "original_path": str(raw)}
+
+
+def _record_path(record: dict) -> Path:
+    if record.get("managed"):
+        return _managed_path(record.get("path", ""))
+    return Path(str(record.get("path") or record.get("original_path") or "")).expanduser().resolve()
 
 def _rg_candidates() -> list[Path]:
     """返回 PATH 之外的常见 rg 安装位置；桌面应用通常不继承终端 PATH。"""
@@ -73,22 +157,52 @@ def _source_status(path: Path) -> tuple[bool, str, str]:
     return False, "missing", "文件或文件夹不可用"
 
 
+def _source_summary(path: Path) -> dict:
+    available, kind, error = _source_status(path)
+    stats = _scan_tree(path) if available else {"bytes": 0, "file_count": 0}
+    archives = _archives(path) if path.is_dir() else []
+    return {
+        "path": str(path),
+        "available": available,
+        "kind": kind,
+        "error": error,
+        "bytes": stats["bytes"],
+        "file_count": stats["file_count"],
+        "archive_count": len(archives),
+        "archives": [{"path": str(item.relative_to(path)), "bytes": item.stat().st_size} for item in archives[:50]],
+    }
+
+
 def sources(settings: dict) -> list[dict]:
     """列出已保存的日志文件或目录来源，不接受浏览器路径参数。"""
     result = []
-    for name, raw_path in settings.get("offline_log_sources", {}).items():
-        path = Path(str(raw_path)).expanduser()
+    for name, raw in settings.get("offline_log_sources", {}).items():
+        record = raw if isinstance(raw, dict) else {"path": str(raw), "managed": False, "legacy": True}
+        path = _record_path(record)
         available, kind, error = _source_status(path)
-        result.append({"name": str(name), "path": str(path), "available": available, "kind": kind, "error": error})
+        stats = _scan_tree(path) if available else {"bytes": 0, "file_count": 0}
+        ignored = record.get("ignored_archives") if isinstance(record.get("ignored_archives"), list) else []
+        result.append({
+            "name": str(name),
+            "path": str(path),
+            "available": available,
+            "kind": kind,
+            "error": error,
+            "managed": bool(record.get("managed")),
+            "legacy": bool(record.get("legacy")),
+            "bytes": stats["bytes"],
+            "file_count": stats["file_count"],
+            "ignored_archives": ignored,
+            "ignored_count": len(ignored),
+            "imported_at": str(record.get("imported_at", "")),
+            "original_path": str(record.get("original_path", "")),
+        })
     return sorted(result, key=lambda item: item["name"])
 
 def source_path(settings: dict, name: object) -> tuple[str, Path]:
     """按来源名称重建当前 settings 白名单中的文件或目录，拒绝未保存路径。"""
-    clean_name = str(name or "").strip()
-    raw_path = settings.get("offline_log_sources", {}).get(clean_name)
-    if not clean_name or not raw_path:
-        raise ValueError("请选择当前配置中已保存的日志来源")
-    path = Path(str(raw_path)).expanduser().resolve()
+    clean_name, record = _source_record(settings, name)
+    path = _record_path(record)
     available, kind, error = _source_status(path)
     if not available:
         detail = error or "文件或文件夹不可用"
@@ -202,7 +316,11 @@ def _archives(source: Path) -> list[Path]:
 def archive_status(settings: dict, source: object) -> dict:
     source_name, folder = source_path(settings, source)
     archives = _archives(folder)
-    return {"source": source_name, "path": str(folder), "archives": [str(path.relative_to(folder)) for path in archives]}
+    return {
+        "source": source_name,
+        "path": str(folder),
+        "archives": [{"path": str(path.relative_to(folder)), "bytes": path.stat().st_size} for path in archives],
+    }
 
 def _extract_archive_here(archive: Path) -> int:
     # 先在压缩包当前目录的隐藏临时区完整展开并校验，成功后再移入当前目录。
@@ -268,6 +386,157 @@ def extract_archives(settings: dict, body: dict) -> dict:
             except (OSError, ValueError, zipfile.BadZipFile, tarfile.TarError) as error:
                 skipped.append(f"{archive.relative_to(folder)}：{error}")
     return {"source": source_name, "path": str(folder), "archives": len(archives), "extracted": extracted, "files": files, "skipped": skipped}
+
+
+def _unique_destination(name: str, source_id: str, source: Path) -> Path:
+    base = _managed_sources_root() / source_id
+    base.mkdir(parents=True, exist_ok=False)
+    return base / source.name
+
+
+def _move_into_managed(source: Path, source_id: str) -> Path:
+    if not source.exists():
+        raise ValueError(f"日志来源不存在：{source}")
+    if source.is_symlink():
+        raise ValueError("日志来源不能是符号链接")
+    try:
+        source.relative_to(_managed_sources_root().resolve())
+        raise ValueError("日志来源已经在用户数据目录中，请直接选择已导入来源")
+    except ValueError as error:
+        if "用户数据目录" in str(error):
+            raise
+    if _archive_kind(source):
+        raise ValueError("单独的压缩日志请改选其所在文件夹")
+    destination = _unique_destination(source.name, source_id, source)
+    try:
+        shutil.move(str(source), str(destination))
+    except Exception:
+        shutil.rmtree(destination.parent, ignore_errors=True)
+        raise
+    return destination
+
+
+def _extract_archives_in_folder(folder: Path, ignore_failed: bool) -> dict:
+    archives = _archives(folder)
+    extracted, files, skipped = 0, 0, []
+    for archive in archives:
+        relative = str(archive.relative_to(folder))
+        try:
+            files += _extract_archive_here(archive)
+            extracted += 1
+        except FileExistsError as error:
+            skipped.append({"path": relative, "error": f"目标已存在 {Path(error.filename or '').name}", "ignored": True})
+        except (OSError, ValueError, zipfile.BadZipFile, tarfile.TarError, EOFError) as error:
+            if not ignore_failed:
+                skipped.append({"path": relative, "error": str(error), "ignored": False})
+            else:
+                skipped.append({"path": relative, "error": str(error), "ignored": True})
+    blocking = [item for item in skipped if not item["ignored"]]
+    return {
+        "archives": len(archives),
+        "extracted": extracted,
+        "files": files,
+        "skipped": skipped,
+        "blocking": blocking,
+        "ignored_archives": [item for item in skipped if item["ignored"]],
+    }
+
+
+def preview_import(body: dict) -> dict:
+    """预览一次来源导入，展示移动前大小和压缩包清单。"""
+    name = _safe_display_name(body.get("name"))
+    source = _input_path(body.get("path"))
+    available, kind, error = _source_status(source)
+    if not available:
+        raise ValueError(error or f"日志来源不可用：{source}")
+    if kind == "archive":
+        raise ValueError("单独的压缩日志请改选其所在文件夹")
+    summary = _source_summary(source)
+    return {"name": name, "source_path": str(source), **summary}
+
+
+def import_source(settings: dict, body: dict) -> dict:
+    """将用户选择的日志来源移动进用户数据目录，并在受管目录内处理压缩包。"""
+    if body.get("confirmed") is not True:
+        raise ValueError("导入日志来源前必须由用户确认")
+    name = _safe_display_name(body.get("name"))
+    source = _input_path(body.get("path"))
+    sources_map = dict(settings.get("offline_log_sources", {}))
+    if name in sources_map and not body.get("replace"):
+        raise ValueError(f"日志来源名称已存在：{name}")
+    source_id = _source_id()
+    with _ARCHIVE_LOCK:
+        managed = _move_into_managed(source, source_id)
+        try:
+            extract_result = _extract_archives_in_folder(managed if managed.is_dir() else managed.parent, bool(body.get("ignore_failed_archives")))
+            if extract_result["blocking"]:
+                first = extract_result["blocking"][0]
+                raise ValueError(f"压缩包解压失败：{first['path']}：{first['error']}。可选择忽略失败项后继续保存。")
+            stats = _scan_tree(managed)
+            record = {
+                "id": source_id,
+                "path": _relative_to_root(managed),
+                "managed": True,
+                "kind": "directory" if managed.is_dir() else "file",
+                "original_path": str(source),
+                "imported_at": _now_iso(),
+                "bytes": stats["bytes"],
+                "file_count": stats["file_count"],
+                "ignored_archives": extract_result["ignored_archives"],
+            }
+            if name in sources_map:
+                _delete_source_files(sources_map[name])
+            sources_map[name] = record
+            offline_config = storage.update("offline_logs", {"offline_log_sources": sources_map})
+            return {
+                "source": name,
+                "record": record,
+                "offline_config": offline_config,
+                "summary": _source_summary(managed),
+                "archives": extract_result,
+            }
+        except Exception:
+            # 导入已经把用户选择的原始日志移动进工作区；失败时尽量搬回原处，
+            # 避免坏压缩包导致用户在 Downloads 中的日志被静默吞掉。
+            if managed.exists() and not source.exists() and source.parent.exists():
+                try:
+                    shutil.move(str(managed), str(source))
+                except Exception:
+                    pass
+            shutil.rmtree((_managed_sources_root() / source_id), ignore_errors=True)
+            raise
+
+
+def _delete_source_files(raw: object) -> int:
+    if not isinstance(raw, dict) or not raw.get("managed"):
+        return 0
+    path = _record_path(raw)
+    source_id = str(raw.get("id", ""))
+    if not re.fullmatch(r"src_[A-Fa-f0-9]{32}", source_id):
+        raise ValueError("受管日志来源 ID 无效，已拒绝删除文件")
+    root = (_managed_sources_root() / source_id).resolve()
+    root.relative_to(_managed_sources_root().resolve())
+    bytes_before = _scan_tree(root if root.exists() else path)["bytes"] if root.exists() or path.exists() else 0
+    if root.exists():
+        shutil.rmtree(root)
+    elif path.exists():
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+    return bytes_before
+
+
+def delete_source(settings: dict, body: dict) -> dict:
+    """删除受管日志来源，并同步移除其用户数据目录文件。"""
+    if body.get("confirmed") is not True:
+        raise ValueError("删除日志来源前必须由用户确认")
+    name, record = _source_record(settings, body.get("source"))
+    sources_map = dict(settings.get("offline_log_sources", {}))
+    released = _delete_source_files(record)
+    sources_map.pop(name, None)
+    offline_config = storage.update("offline_logs", {"offline_log_sources": sources_map})
+    return {"source": name, "released_bytes": released, "offline_config": offline_config}
 
 def normalize_filters(value: object) -> list[dict]:
     if not isinstance(value, list) or not value:

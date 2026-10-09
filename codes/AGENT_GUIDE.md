@@ -107,7 +107,6 @@ ADB 工具
 | `web/app.js` | 前端启动编排，不承载具体功能实现 |
 | `web/styles.css` | 布局与主题语义样式 |
 | `web/themes.json` | 内置主题、颜色令牌和中文用途说明 |
-| `web/offline_log_worker.js` | 浏览器模式离线日志分块扫描 |
 | `用户须知.md` | 应用内用户须知 |
 | `build_desktop.py` | PyInstaller 桌面构建 |
 | `package_launcher.py` | 源码分发包生成 |
@@ -206,12 +205,9 @@ ADB 工具
 
 ### 离线日志
 
-离线日志支持两种来源：
+离线日志只支持高速受管来源：桌面宿主通过 QWebChannel 和系统选择器取得单个文件或目录路径，后端在用户确认后移动到 `local-tools/offline-logs/sources/<source-id>/`。来源配置只保存受管相对路径、原始路径、导入时间、文件数量、占用空间和被忽略的压缩包信息；过滤阶段只提交来源名称和筛选条件，由后端按配置白名单调用 `rg --json --pcre2`。
 
-- 高速来源：桌面宿主通过 QWebChannel 和系统选择器取得单个文件或目录路径。目录来源保存后立即检测压缩日志，前端确认且后端验证 `confirmed=true` 后，在包所在目录暂存、完整就位并删除原包；失败则回滚展开内容并保留原包。单独的压缩文件必须改选其所在目录，避免解压后保存的来源路径失效。过滤阶段只调用 `rg --json --pcre2`，不得再次检测或解压。
-- 浏览器文件/文件夹：浏览器使用 `File.stream()` 和 `offline_log_worker.js` 分块读取，不上传日志正文；含 NUL 字节或 gzip 标识的文件视为二进制并跳过。
-
-浏览器模式只保留命中行，结果按批次渲染；下载操作包含完整命中结果。分析方案保存筛选条件、六色高亮词和大小写选项，不保存目录路径、日志正文、字体、透明度或导出文件名。
+导入目录时会在受管目录内处理压缩日志，成功解压的压缩包删除原包；损坏或冲突的压缩包默认阻止导入，用户明确选择忽略后可保留失败包并继续保存。单独选择压缩文件必须提示改选所在目录。删除来源必须同时删除用户数据目录内的受管日志文件，并在 UI 中提示释放空间。分析方案保存筛选条件、六色高亮词和大小写选项，不保存原始目录路径、日志正文、字体、透明度或导出文件名。
 
 ### PCM 音频处理
 
@@ -234,6 +230,7 @@ ADB 工具
 | `/api/adb/wireless-suggestion` | 无线地址建议及网络信息 |
 | `/api/adb/pairing-status` | Android 11+ 配对能力与 mDNS 服务 |
 | `/api/config` | 聚合配置只读视图及 `_meta` |
+| `/api/system/storage-usage` | 用户数据目录总占用与按功能域分组统计 |
 | `/api/themes` | 内置与用户主题目录 |
 | `/api/apks`、`/api/resources`、`/api/processes` | 部署和进程数据 |
 | `/api/apps`、`/api/apps/details` | 全量应用列表与按需详情 |
@@ -265,8 +262,8 @@ ADB 工具
 | `/api/apps/*` | 应用启动、停止、清数据、启停、卸载和 Pull APK |
 | `/api/adb-commands/*`、`/api/broadcasts/send` | 自定义命令和广播 |
 | `/api/logs/export`、`/api/logs/clear` | 实时日志导出和清空 |
-| `/api/offline-logs/query` | 原生 rg 离线扫描，默认安全展开压缩日志 |
-| `/api/offline-logs/archives`、`/api/offline-logs/extract` | 检测压缩日志并在确认后原目录解压 |
+| `/api/offline-logs/import-preview`、`/api/offline-logs/import`、`/api/offline-logs/delete-source` | 导入、保存和删除受管离线日志来源 |
+| `/api/offline-logs/query` | 原生 rg 离线扫描 |
 | `/api/audio/upload`、`/api/audio/preview` | 导入 PCM、生成播放预览 |
 | `/api/audio/ffmpeg/path`、`/api/audio/delete` | 配置 FFmpeg 与删除 PCM |
 | `/api/device-logs/*` | 设备日志扫描、Pull 和结果目录打开 |

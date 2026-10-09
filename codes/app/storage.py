@@ -32,10 +32,31 @@ STORAGE_DOMAINS = {
     "device_files": {"config": None, "root": ".", "directories": ("downloads",)},
     "bugreports": {"config": None, "root": "adb-tools/bugreports", "directories": ("files", "runtime")},
     "performance_diagnostics": {"config": "adb-tools/performance-diagnostics/config.json", "default": {"storage_key": "performance_diagnostics", "schema_version": 1, "sample_interval_seconds": 1}, "directories": ("sessions", "runtime")},
-    "offline_logs": {"config": "local-tools/offline-logs/config.json", "default": {"storage_key": "offline_logs", "schema_version": 2, "offline_filter_presets": {}, "offline_log_sources": {}}, "directories": ()},
+    "offline_logs": {"config": "local-tools/offline-logs/config.json", "default": {"storage_key": "offline_logs", "schema_version": 3, "offline_filter_presets": {}, "offline_log_sources": {}}, "directories": ("sources",)},
     "audio_processing": {"config": "local-tools/audio-processing/config.json", "default": {"storage_key": "audio_processing", "schema_version": 1, "ffmpeg_path": "", "sample_format": "s16le", "sample_rate": 48000, "channels": 2}, "directories": ("inputs", "previews")},
     "themes": {"config": "runtime/themes.json", "default": {"storage_key": "themes", "schema_version": 1, "selected_theme": "", "themes": {}}, "directories": ()},
     "runtime": {"config": None, "root": "runtime", "directories": ("web-profile",)},
+}
+
+FEATURE_LABELS = {
+    "app": "全局启动配置",
+    "adb": "ADB 环境",
+    "apk_center": "APK 中心",
+    "signing": "签名文件",
+    "resources": "资源部署",
+    "processes": "应用与进程",
+    "broadcasts": "广播预设",
+    "live_logs": "实时日志",
+    "device_logs": "设备日志源",
+    "commands": "自定义命令",
+    "captures": "屏幕捕获",
+    "device_files": "设备文件下载缓存",
+    "bugreports": "Bugreport",
+    "performance_diagnostics": "性能诊断",
+    "offline_logs": "离线日志",
+    "audio_processing": "音频处理",
+    "themes": "主题",
+    "runtime": "运行时数据",
 }
 
 
@@ -195,6 +216,63 @@ def data_dir(feature: str, name: str) -> Path:
     item = base / name
     item.mkdir(parents=True, exist_ok=True)
     return item
+
+
+def _scan_usage_path(item: Path, seen: set[Path]) -> dict:
+    bytes_total, file_count = 0, 0
+    if not item.exists() or item.is_symlink():
+        return {"bytes": 0, "files": 0}
+    candidates = [item] if item.is_file() else item.rglob("*")
+    for path in candidates:
+        if not path.is_file() or path.is_symlink():
+            continue
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        try:
+            bytes_total += path.stat().st_size
+            file_count += 1
+        except OSError:
+            continue
+    return {"bytes": bytes_total, "files": file_count}
+
+
+def usage() -> dict:
+    """按稳定功能域统计用户数据目录磁盘占用。"""
+    initialize()
+    total_seen: set[Path] = set()
+    total = _scan_usage_path(ROOT, total_seen)
+    attributed_seen: set[Path] = set()
+    features = []
+    for feature, definition in STORAGE_DOMAINS.items():
+        paths = []
+        config = definition.get("config")
+        base = ROOT / definition.get("root", Path(config).parent if config else "")
+        if config:
+            paths.append(ROOT / config)
+        for relative in definition.get("directories", ()):
+            paths.append(base / relative)
+        bytes_total, file_count = 0, 0
+        for item in paths:
+            stats = _scan_usage_path(item, attributed_seen)
+            bytes_total += stats["bytes"]
+            file_count += stats["files"]
+        features.append({
+            "key": feature,
+            "label": FEATURE_LABELS.get(feature, feature),
+            "bytes": bytes_total,
+            "files": file_count,
+            "paths": [str(path.relative_to(ROOT)) for path in paths],
+        })
+    attributed_bytes = sum(item["bytes"] for item in features)
+    attributed_files = sum(item["files"] for item in features)
+    other_bytes = max(0, total["bytes"] - attributed_bytes)
+    other_files = max(0, total["files"] - attributed_files)
+    if other_bytes or other_files:
+        features.append({"key": "other", "label": "其他文件", "bytes": other_bytes, "files": other_files, "paths": ["."]})
+    features.sort(key=lambda item: item["bytes"], reverse=True)
+    return {"root": str(ROOT), "bytes": total["bytes"], "files": total["files"], "features": features}
 
 
 def downloads_dir() -> Path:

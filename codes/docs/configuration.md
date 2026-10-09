@@ -9,7 +9,7 @@ Glacien 不再使用 `settings.<方案名>.json` 或 `active_settings.json`。�
 - Linux：`${XDG_DATA_HOME:-~/.local/share}/GlacienWorkbench/`
 - 测试覆盖：`GLACIEN_DATA_DIR=/path`
 
-设置页会显示该路径，并可通过“打开文件夹”调用当前系统的 Finder、资源管理器或默认 Linux 文件管理器。
+设置页会显示该路径和当前用户数据总占用，并可通过“打开文件夹”调用当前系统的 Finder、资源管理器或默认 Linux 文件管理器。“查看占用”会按 `storage.STORAGE_DOMAINS` 的稳定功能域展示每类数据的文件数量和磁盘占用，无法归入已注册功能域的根目录文件显示为“其他文件”。
 
 目录结构：
 
@@ -18,7 +18,9 @@ GlacienWorkbench/
 ├── app/config.json
 ├── downloads/
 ├── local-tools/
-│   ├── offline-logs/config.json
+│   ├── offline-logs/
+│   │   ├── config.json
+│   │   └── sources/
 │   └── audio-processing/
 │       ├── config.json
 │       ├── inputs/
@@ -74,7 +76,7 @@ GlacienWorkbench/
 - 业务保存使用 `storage.update()`，HTTP 使用 `POST /api/config/domain`，一次只修改一个域并保留未知字段。`GET /api/config` 继续提供前端聚合视图，但不再接受聚合保存。
 - 当前 `commands` schema 为 v2，每条自定义命令都有独立 `id`；名称和分类可修改，ID 不变。旧 v1 命令会在首次读取时补 ID。
 - 当前 `processes` schema 为 v2，`watched_packages` 保存用户明确关注的包名，原 `process_package_keywords` 继续提供批量匹配；每个包的特殊拉起入口保存为 `app_launches.<package>.command`。旧 v1 的 action、component、activity 和 extras 会在备份后转换成等价的 `am start` 命令。
-- 当前 `offline_logs` schema 为 v2，`offline_log_sources` 的绝对路径既可指向日志文件，也可指向日志目录；旧 v1 目录来源会无损保留。
+- 当前 `offline_logs` schema 为 v3，`offline_log_sources` 保存受管日志来源记录：来源 ID、用户数据目录内相对路径、原始路径、导入时间、文件数量、占用空间和被忽略的压缩包。旧 v1/v2 绝对路径会迁移为 `legacy` 记录，不在迁移中移动或删除用户文件；用户重新导入后才进入受管目录。
 
 页面调整不触发数据迁移。例如部署中心改名或移动 Tab 仍使用 `apk_center`，日志 Pull 移入设备工具仍使用 `device_logs`，截图和录屏调整布局仍使用 `captures`。只有持久化数据结构变化才提升对应 schema。
 

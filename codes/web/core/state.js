@@ -2,7 +2,7 @@
 const state = {
   config: null, apks: [], resources: [], logs: null, logRule: {}, logCount: 0, page: 'home',
   adbSerial: localStorage.getItem('glacien.adb.serial') || '', adbSelectionRequired: false,
-  offline: {files: [], results: [], rendered: 0, skipped: 0, worker: null, scanning: false, totalBytes: 0, sources: []},
+  offline: {results: [], rendered: 0, scanning: false, sources: []},
   audio: {files: [], selected: '', previewUrl: ''},
   deviceLogs: {sources: {}, files: [], result: null, pulling: false},
   captures: {screenshot: null, recording: null, recordingState: 'idle', scrcpyAvailable: false, timer: null, capability: 'screenshot', displays: [], continuous: null, compareItems: [], library: {kind: 'all', offset: 0, items: [], hasMore: false}},

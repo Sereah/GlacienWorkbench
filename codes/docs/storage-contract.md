@@ -21,7 +21,7 @@
 | `processes` | 关注应用包名、关键词匹配与特殊拉起配置 |
 | `broadcasts` | 广播预设 |
 | `live_logs` | 实时日志预设与导出日志 |
-| `offline_logs` | 离线日志预设与本地来源 |
+| `offline_logs` | 离线日志预设与受管本地来源 |
 | `audio_processing` | FFmpeg 路径、PCM 默认参数、输入文件与播放预览 |
 | `device_logs` | 设备日志 Pull 来源 |
 | `commands` | 自定义命令与分类 |

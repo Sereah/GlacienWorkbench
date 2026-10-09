@@ -31,7 +31,7 @@ DOMAIN_FIELDS = {
     "processes": {"process_package_keywords", "watched_packages", "app_launches"},
     "broadcasts": {"broadcasts"},
     "live_logs": {"log_filters"},
-    "offline_logs": {"offline_filter_presets", "offline_log_sources"},
+    "offline_logs": {"offline_filter_presets"},
     "audio_processing": {"ffmpeg_path", "audio_sample_format", "audio_sample_rate", "audio_channels"},
     "device_logs": {"device_log_sources"},
     "commands": {"adb_commands", "adb_command_categories"},

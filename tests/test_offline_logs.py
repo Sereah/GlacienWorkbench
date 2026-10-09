@@ -9,7 +9,7 @@ import unittest
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
-from codes.app import logs
+from codes.app import logs, storage
 
 
 class OfflineLogArchiveTest(unittest.TestCase):
@@ -18,8 +18,12 @@ class OfflineLogArchiveTest(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.source = self.root / "source"
         self.source.mkdir()
+        self.original_storage_root = storage.ROOT
+        storage.ROOT = self.root / "data"
+        storage.initialize()
 
     def tearDown(self):
+        storage.ROOT = self.original_storage_root
         self.temporary.cleanup()
 
     def settings(self):
@@ -252,6 +256,64 @@ class OfflineLogArchiveTest(unittest.TestCase):
         self.assertEqual(0, result["extracted"])
         self.assertIn("越界路径", result["skipped"][0])
         self.assertFalse((outside / "escaped.log").exists())
+
+    def test_import_moves_directory_to_managed_sources_and_deletes_it(self):
+        log_file = self.source / "system.log"
+        log_file.write_text("needle\n", encoding="utf-8")
+
+        result = logs.import_source(
+            {"offline_log_sources": {}},
+            {"name": "runlog", "path": str(self.source), "confirmed": True},
+        )
+
+        managed = storage.data_dir("offline_logs", "sources") / result["record"]["path"]
+        self.assertTrue(managed.is_dir())
+        self.assertTrue((managed / "system.log").is_file())
+        self.assertFalse(self.source.exists())
+        settings = {"offline_log_sources": {"runlog": result["record"]}}
+        listed = logs.sources(settings)[0]
+        self.assertTrue(listed["managed"])
+        self.assertEqual(1, listed["file_count"])
+
+        deleted = logs.delete_source(settings, {"source": "runlog", "confirmed": True})
+        self.assertGreater(deleted["released_bytes"], 0)
+        self.assertFalse(managed.parent.exists())
+
+    def test_import_can_ignore_bad_gzip_and_keep_source_saved(self):
+        good = self.source / "good.log.gz"
+        with gzip.open(good, "wb") as output:
+            output.write(b"needle\n")
+        bad = self.source / "bad.log.gz"
+        bad.write_bytes(b"not a complete gzip stream")
+
+        result = logs.import_source(
+            {"offline_log_sources": {}},
+            {
+                "name": "runlog",
+                "path": str(self.source),
+                "confirmed": True,
+                "ignore_failed_archives": True,
+            },
+        )
+
+        managed = storage.data_dir("offline_logs", "sources") / result["record"]["path"]
+        self.assertTrue((managed / "good.log").is_file())
+        self.assertTrue((managed / "bad.log.gz").is_file())
+        self.assertEqual(1, len(result["record"]["ignored_archives"]))
+        self.assertEqual("bad.log.gz", result["record"]["ignored_archives"][0]["path"])
+
+    def test_import_rolls_back_when_bad_gzip_is_not_ignored(self):
+        bad = self.source / "bad.log.gz"
+        bad.write_bytes(b"not a complete gzip stream")
+
+        with self.assertRaisesRegex(ValueError, "解压失败"):
+            logs.import_source(
+                {"offline_log_sources": {}},
+                {"name": "runlog", "path": str(self.source), "confirmed": True},
+            )
+
+        self.assertTrue(self.source.exists())
+        self.assertTrue(bad.exists())
 
 
 if __name__ == "__main__":

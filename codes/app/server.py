@@ -8,7 +8,7 @@ from urllib.request import urlopen
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs,quote,urlparse
-from . import android,app_manager,artifacts,audio,bugreports,captures,config,device,device_files,device_logs,logs,performance,runtime,themes
+from . import android,app_manager,artifacts,audio,bugreports,captures,config,device,device_files,device_logs,logs,performance,runtime,storage,themes
 
 # 前端是只读程序资源；settings、日志和产物由 config.ROOT 指向可写数据目录。
 STATIC=runtime.resource_path("web").resolve()
@@ -109,6 +109,7 @@ class Handler(BaseHTTPRequestHandler):
             if route=="/api/adb/wireless-suggestion": return self.reply(android.wireless_suggestion(settings,q.get("serial",[""])[0]))
             if route=="/api/adb/pairing-status": return self.reply(android.wireless_pairing_status(settings))
             if route=="/api/config": return self.reply(config.payload(settings))
+            if route=="/api/system/storage-usage": return self.reply(storage.usage())
             if route=="/api/user-guide": return self.reply({"markdown":runtime.user_guide_markdown()})
             if route=="/api/themes": return self.reply(themes.catalog())
             if route=="/api/config/export": return self.reply(config.shareable_payload(settings))
@@ -131,7 +132,6 @@ class Handler(BaseHTTPRequestHandler):
             if route=="/api/adb-commands/export": return self.reply(config.command_export())
             if route=="/api/offline-log-sources": return self.reply(logs.sources(settings))
             if route=="/api/offline-logs/status": return self.reply(logs.capability())
-            if route=="/api/offline-logs/archives": return self.reply(logs.archive_status(settings,q.get("source",[""])[0]))
             if route=="/api/audio/status": return self.reply(audio.capability(settings))
             if route=="/api/audio/files": return self.reply(audio.files())
             if route=="/api/audio/preview": return self.file_reply(audio.resolve_preview(q.get("id",[""])[0]))
@@ -217,7 +217,9 @@ class Handler(BaseHTTPRequestHandler):
             actions["/api/performance/stop"] = performance.stop
             actions["/api/performance/sessions/delete"] = lambda: performance.delete_sessions(body.get("ids"), body.get("confirmed"))
             actions["/api/offline-logs/query"] = lambda: logs.query(settings, body)
-            actions["/api/offline-logs/extract"] = lambda: logs.extract_archives(settings, body)
+            actions["/api/offline-logs/import-preview"] = lambda: logs.preview_import(body)
+            actions["/api/offline-logs/import"] = lambda: logs.import_source(settings, body)
+            actions["/api/offline-logs/delete-source"] = lambda: logs.delete_source(settings, body)
             actions["/api/audio/ffmpeg/path"] = lambda: audio.save_ffmpeg_path(body.get("path", ""))
             actions["/api/audio/estimate"] = lambda: audio.estimate(body.get("id", ""), body)
             actions["/api/audio/preview"] = lambda: audio.preview(settings, body)
